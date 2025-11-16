@@ -48,16 +48,16 @@ RUN mkdir -p /tmp/uploads /tmp/recordings /tmp/logs /tmp/whisper-cache && \
 USER appuser
 
 # Pre-download Whisper model to reduce startup time
-RUN python -c "
-import os
-os.environ['WHISPER_CACHE_DIR'] = '/tmp/whisper-cache'
-try:
-    from faster_whisper import WhisperModel
-    model = WhisperModel('base', device='cpu', compute_type='int8', download_root='/tmp/whisper-cache')
-    print('✅ Whisper base model pre-downloaded successfully')
-except Exception as e:
-    print(f'⚠️  Whisper model pre-download failed: {e}')
-    print('Model will be downloaded on first use')
+RUN python -c "\
+import os; \
+os.environ['WHISPER_CACHE_DIR'] = '/tmp/whisper-cache'; \
+try: \
+    from faster_whisper import WhisperModel; \
+    model = WhisperModel('base', device='cpu', compute_type='int8', download_root='/tmp/whisper-cache'); \
+    print('✅ Whisper base model pre-downloaded successfully'); \
+except Exception as e: \
+    print(f'⚠️ Whisper model pre-download failed: {e}'); \
+    print('Model will be downloaded on first use'); \
 "
 
 # Expose port (DigitalOcean will set PORT env var)
