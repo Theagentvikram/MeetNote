@@ -4,8 +4,8 @@ FROM python:3.11-alpine
 # Set working directory
 WORKDIR /app
 
-# Install minimal system dependencies
-RUN apk add --no-cache gcc musl-dev
+# Install minimal system dependencies (keep them for numpy)
+RUN apk add --no-cache gcc g++ musl-dev
 
 # Copy requirements first for better Docker layer caching
 COPY requirements.txt .
@@ -14,9 +14,6 @@ COPY requirements.txt .
 RUN pip install --no-cache-dir --upgrade pip && \
     pip install --no-cache-dir -r requirements.txt && \
     pip cache purge
-
-# Remove build dependencies to save space
-RUN apk del gcc musl-dev
 
 # Copy application code
 COPY . .
