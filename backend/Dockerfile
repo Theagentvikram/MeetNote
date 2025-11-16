@@ -18,6 +18,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libffi-dev \
     libssl-dev \
     ffmpeg \
+    pkg-config \
     curl \
     && rm -rf /var/lib/apt/lists/* \
     && apt-get clean
