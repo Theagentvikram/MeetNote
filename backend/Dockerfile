@@ -1,6 +1,7 @@
 # Production Dockerfile for MeetNote Backend
 # Optimized for DigitalOcean App Platform and Docker deployment
-FROM python:3.11-slim
+# Start from Debian bookworm for newer FFmpeg/codec headers
+FROM python:3.11-bookworm
 
 # Set environment variables
 ENV PYTHONUNBUFFERED=1
@@ -16,8 +17,14 @@ RUN apt-get update && apt-get install -y \
     libssl-dev \
     libpq-dev \
     ffmpeg \
+    libavformat-dev \
+    libavcodec-dev \
+    libavdevice-dev \
+    libswscale-dev \
+    libswresample-dev \
     libsndfile1 \
     portaudio19-dev \
+    pkg-config \
     && rm -rf /var/lib/apt/lists/* \
     && apt-get clean
 
