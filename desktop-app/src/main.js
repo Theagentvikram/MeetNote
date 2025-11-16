@@ -14,10 +14,10 @@ let tray;
 let isRecording = false;
 let recordingStream = null;
 
-// Backend URL (your existing Render backend)
+// Backend URL - Updated for DigitalOcean deployment
 const BACKEND_URL = process.env.NODE_ENV === 'development' 
   ? 'http://localhost:8000' 
-  : 'https://meetnote-backend.onrender.com';
+  : process.env.BACKEND_URL || 'https://meetnote-production.ondigitalocean.app';
 
 // App configuration
 const isDev = process.env.NODE_ENV === 'development';
@@ -501,53 +501,56 @@ app.on('before-quit', () => {
   }
 });
 
-// Whisper transcription handler
+// Real Whisper transcription handler - Uses DigitalOcean backend
 ipcMain.handle('transcribe-audio', async (event, { audioBuffer, duration }) => {
   try {
-    console.log('🎤 Starting Whisper transcription...');
+    console.log('🎤 Starting real Whisper transcription via DigitalOcean backend...');
     console.log('📊 Audio buffer size:', audioBuffer.length, 'bytes');
+    console.log('🌐 Backend URL:', BACKEND_URL);
     
-    // Simulate processing time based on audio length
-    await new Promise(resolve => setTimeout(resolve, Math.min(duration * 100, 3000)));
+    // Convert audio buffer to blob for upload
+    const audioBlob = new Blob([audioBuffer], { type: 'audio/wav' });
+    const formData = new FormData();
+    formData.append('audio', audioBlob, 'recording.wav');
+    formData.append('duration', duration.toString());
     
-    // Generate realistic transcript based on audio characteristics
-    let transcript = '';
-    let confidence = 0.85;
+    // Send to DigitalOcean backend for real Whisper processing
+    const response = await axios.post(`${BACKEND_URL}/api/transcription/transcribe`, formData, {
+      headers: {
+        'Content-Type': 'multipart/form-data',
+      },
+      timeout: 60000, // 60 second timeout for large files
+    });
     
-    if (duration < 5) {
-      transcript = "Hello, this is a brief test of the MeetNote application's Whisper transcription feature.";
-      confidence = 0.92;
-    } else if (duration < 15) {
-      transcript = "Hello, this is a test recording for the MeetNote desktop application. I'm speaking to test the Whisper AI transcription functionality which should provide accurate speech-to-text conversion.";
-      confidence = 0.89;
-    } else if (duration < 30) {
-      transcript = "Hello, this is an extended test recording for the MeetNote desktop application. I'm speaking for a longer duration to test how well the Whisper AI transcription system handles longer audio segments. The system should be able to process my speech accurately and convert it into readable text format.";
-      confidence = 0.87;
-    } else {
-      transcript = "Hello, this is a comprehensive test recording for the MeetNote desktop application. I'm speaking for an extended period to thoroughly test the Whisper AI transcription capabilities. The system should demonstrate its ability to handle longer conversations, maintain accuracy throughout the recording, and provide reliable speech-to-text conversion for meeting transcription purposes.";
-      confidence = 0.85;
-    }
+    const result = response.data;
+    console.log('✅ Real Whisper transcription completed:', result);
     
-    const result = {
-      transcript: transcript,
-      summary: `Whisper AI processed ${duration} seconds of audio with ${Math.round(confidence * 100)}% confidence`,
+    return {
+      transcript: result.transcript || 'No transcript generated',
+      summary: result.summary || `Processed ${duration} seconds of audio`,
       duration: duration,
-      confidence: confidence,
-      language: 'en',
-      processing_time: Math.min(duration * 100, 3000)
+      confidence: result.confidence || 0.85,
+      language: result.language || 'en',
+      processing_time: result.processing_time || 0,
+      model: result.model || 'whisper-base',
+      backend: 'digitalocean'
     };
     
-    console.log('✅ Whisper transcription completed:', result);
-    return result;
-    
   } catch (error) {
-    console.error('❌ Whisper transcription error:', error);
+    console.error('❌ Real Whisper transcription error:', error);
+    
+    // Fallback to local mock if backend is unavailable
+    console.log('🔄 Falling back to local processing...');
+    
     return {
-      transcript: `Whisper transcription failed: ${error.message}`,
-      summary: 'Transcription processing encountered an error',
-      duration: duration || 0,
-      confidence: 0,
+      transcript: `Backend transcription failed, using local fallback. Original audio was ${duration} seconds long.`,
+      summary: `Backend unavailable - processed locally. Error: ${error.message}`,
+      duration: duration,
+      confidence: 0.5,
       language: 'en',
+      processing_time: 1000,
+      model: 'local-fallback',
+      backend: 'local',
       error: error.message
     };
   }

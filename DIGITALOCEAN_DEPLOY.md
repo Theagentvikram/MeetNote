@@ -1,130 +1,118 @@
-# 🌊 DigitalOcean Production Deployment - $200 Credits Strategy
+# Deploy MeetNote to DigitalOcean App Platform
 
-Deploy a **production-grade** MeetNote system with full Whisper AI and managed database using your $200 DigitalOcean credits.
+## Prerequisites
+- DigitalOcean account with $50 credits
+- GitHub repository with your MeetNote code
+- Supabase project with database set up
 
-## 💰 Optimized Cost Strategy ($200 Credits = ~6 months)
+## Cost Estimate
+- **Basic XXS**: $5/month (512MB RAM, 1 vCPU) - **Recommended**
+- **Basic XS**: $12/month (1GB RAM, 1 vCPU)
+- With $50 credits, you can run for **10 months** on Basic XXS
 
-### **Recommended Production Setup**
-| Service | Specs | Cost/Month | Purpose |
-|---------|-------|------------|----------|
-| **App Platform Pro** | 1GB RAM, 1 vCPU | $12 | Full Whisper AI |
-| **Managed PostgreSQL** | 1GB RAM, 1 vCPU | $15 | Reliable database |
-| **Spaces Storage** | 250GB + CDN | $5 | Audio file storage |
-| **Load Balancer** | SSL + Health checks | $10 | High availability |
-| **Total** | | **$42/month** | **~5 months with $200** |
+## Step 1: Prepare Your Repository
 
-### **Budget Alternative Setup**
-| Service | Specs | Cost/Month | Purpose |
-|---------|-------|------------|----------|
-| **App Platform Basic** | 512MB RAM | $5 | Mock transcription |
-| **Supabase Free** | PostgreSQL | $0 | Database (90 days) |
-| **Total** | | **$5/month** | **40 months with $200** |
-
-## 🚀 Quick Deploy (5 minutes)
-
-### 1. **Create DigitalOcean Account**
-- Go to [DigitalOcean](https://digitalocean.com)
-- Sign up with your $50 credits
-- Verify your account
-
-### 2. **Deploy via App Platform**
+1. **Push your code to GitHub** (if not already done):
 ```bash
-# Option A: Use our pre-configured app.yaml
-# Just upload the .do/app.yaml file in the DO dashboard
-
-# Option B: Quick deploy button (if available)
-# Click deploy and connect your GitHub repo
+git add .
+git commit -m "Prepare for DigitalOcean deployment"
+git push origin main
 ```
 
-### 3. **Set Environment Variables**
-In the DigitalOcean dashboard, add these secrets:
-```
-SUPABASE_URL=your_supabase_url
-SUPABASE_KEY=your_supabase_key
-```
+## Step 2: Update Environment Variables
 
-### 4. **Deploy!**
-- App Platform will automatically build and deploy
-- Your API will be available at: `https://your-app-name.ondigitalocean.app`
-
-## 🔧 Manual Setup Steps
-
-### 1. **Connect GitHub Repository**
-- In DO dashboard, go to "Apps" → "Create App"
-- Connect your GitHub account
-- Select the `AbhiCherupally/MeetNote` repository
-- Choose `main` branch
-
-### 2. **Configure Build Settings**
+1. **Edit `.do/app.yaml`** and update these values:
 ```yaml
-Source Directory: /backend
-Build Command: (auto-detected)
-Run Command: uvicorn app.main:app --host 0.0.0.0 --port $PORT --workers 1
+github:
+  repo: your-username/your-repo-name  # Update this!
+envs:
+- key: SUPABASE_URL
+  value: YOUR_SUPABASE_URL  # From Supabase dashboard
+- key: SUPABASE_KEY
+  value: YOUR_SUPABASE_ANON_KEY  # From Supabase dashboard
 ```
 
-### 3. **Choose Plan**
-- Select **Basic** plan (512MB RAM, $5/month)
-- Perfect for our optimized backend!
+## Step 3: Deploy to DigitalOcean
 
-### 4. **Set Environment Variables**
-```
-ENVIRONMENT=production
-CORS_ORIGINS=http://localhost:5173,http://localhost:3000,https://meetnoteapp.netlify.app
-SUPABASE_URL=[your_supabase_url]
-SUPABASE_KEY=[your_supabase_key]
-```
-
-## 🎯 Why DigitalOcean App Platform?
-
-### ✅ **Advantages:**
-- **Perfect RAM match**: 512MB (exactly what we optimized for)
-- **Auto-deployments**: Push to GitHub → Auto deploy
-- **Built-in SSL**: HTTPS out of the box
-- **Health checks**: Automatic restart if app fails
-- **Great value**: $5/month = 10 months with your credits!
-
-### 📊 **vs Render Comparison:**
-| Feature | DigitalOcean | Render |
-|---------|--------------|--------|
-| RAM | 512MB | 512MB |
-| Price | $5/month | Free (limited) |
-| Reliability | Excellent | Good |
-| Deploy Speed | ~2-3 min | ~3-5 min |
-| Credits Duration | **10 months** | N/A |
-
-## 🔄 Migration from Render
-
-### 1. **Update Frontend URLs**
-In your Electron app, update the backend URL:
-```javascript
-// In desktop-app/src/main.js
-const BACKEND_URL = process.env.NODE_ENV === 'development' 
-  ? 'http://localhost:8000'
-  : 'https://your-app-name.ondigitalocean.app';  // Update this
-```
-
-### 2. **Test the Migration**
+### Option A: Using DigitalOcean CLI (Recommended)
 ```bash
-# Test the new endpoint
-curl https://your-app-name.ondigitalocean.app/api/health
+# Install DO CLI
+brew install doctl  # macOS
+# or download from: https://github.com/digitalocean/doctl/releases
 
-# Should return:
-# {"status":"healthy","database":"supabase (connected)","whisper":"mock_available"}
+# Authenticate
+doctl auth init
+
+# Deploy the app
+doctl apps create .do/app.yaml
 ```
 
-## 🎉 Expected Results
+### Option B: Using DigitalOcean Web Console
+1. Go to [DigitalOcean Apps](https://cloud.digitalocean.com/apps)
+2. Click **"Create App"**
+3. Choose **"GitHub"** as source
+4. Select your repository and `main` branch
+5. Choose **"Autodeploy"** for automatic deployments
+6. Set **Source Directory** to `/backend`
+7. Set **Run Command** to: `uvicorn app.main:app --host 0.0.0.0 --port $PORT --workers 1`
+8. Add environment variables:
+   - `SUPABASE_URL`: Your Supabase project URL
+   - `SUPABASE_KEY`: Your Supabase anon key
+   - `ENVIRONMENT`: `production`
+9. Choose **Basic XXS** ($5/month) plan
+10. Click **"Create Resources"**
 
-- **Deployment time**: ~3-5 minutes
-- **Monthly cost**: $5 (vs $0 Render free tier)
-- **Duration**: **10 full months** with your $50 credits
-- **Performance**: Same or better than Render
-- **Reliability**: Enterprise-grade infrastructure
+## Step 4: Configure Your Frontend
 
-## 💡 Pro Tips
+Once deployed, update your frontend to use the new DigitalOcean URL:
 
-1. **Monitor usage**: Check your billing dashboard monthly
-2. **Scale if needed**: Upgrade to Professional ($12/month) if you need more RAM
-3. **Add frontend**: Deploy your Electron app's web version as a static site
-4. **Database**: Consider DO Managed PostgreSQL if you outgrow Supabase
+**In `desktop-app/src/renderer/renderer.js`:**
+```javascript
+const backendUrl = 'https://your-app-name.ondigitalocean.app';
+```
 
-Your $50 credits will give you **10 months** of worry-free hosting! 🎉
+## Step 5: Test Your Deployment
+
+1. **Health Check**: Visit `https://your-app-name.ondigitalocean.app/api/health`
+2. **Test API**: 
+```bash
+curl https://your-app-name.ondigitalocean.app/api/meetings
+```
+
+## Monitoring & Logs
+
+- **View Logs**: DigitalOcean Console → Apps → Your App → Runtime Logs
+- **Metrics**: Built-in CPU, Memory, and Request metrics
+- **Alerts**: Set up alerts for high resource usage
+
+## Scaling Options
+
+- **Vertical Scaling**: Upgrade to Basic XS (1GB RAM) if needed
+- **Horizontal Scaling**: Add more instances (auto-scaling available)
+- **Database**: Supabase handles scaling automatically
+
+## Troubleshooting
+
+### Common Issues:
+1. **502 Bad Gateway**: Check runtime logs for startup errors
+2. **Environment Variables**: Verify in App Settings
+3. **Build Failures**: Check build logs in deployment history
+
+### Performance Tips:
+- Monitor memory usage (should stay under 400MB)
+- Use connection pooling for database
+- Enable gzip compression for responses
+
+## Cost Optimization
+
+- **Basic XXS** is sufficient for development and light production
+- Monitor usage in DigitalOcean dashboard
+- Set up billing alerts to avoid surprises
+- Consider pausing the app when not in use (saves costs)
+
+## Next Steps
+
+1. Set up custom domain (optional)
+2. Enable HTTPS (automatic with DigitalOcean)
+3. Set up monitoring and alerts
+4. Configure backup strategy for Supabase

@@ -5,7 +5,8 @@
 
 // Constants
 // Auto-detect environment based on available endpoints
-let API_BASE_URL = 'https://meetnote-backend.onrender.com';  // Production default
+let API_BASE_URL = 'https://meetnote-production.ondigitalocean.app';  // DigitalOcean production
+// This will be updated by the deployment script with your actual app name
 
 // For local development, check if local server is available
 async function detectEnvironment() {

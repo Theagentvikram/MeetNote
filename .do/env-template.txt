@@ -1,0 +1,91 @@
+# DigitalOcean App Platform Environment Variables
+# Copy these values to your DO App Platform → Settings → Environment Variables
+
+# =============================================================================
+# REQUIRED SECRETS (Set as SECRET type in DO dashboard)
+# =============================================================================
+
+# Generate with: openssl rand -hex 32
+SECRET_KEY=your_generated_secret_key_here
+
+# From your DigitalOcean Managed Database
+# Format: postgresql://username:password@host:port/database?sslmode=require
+DATABASE_URL=postgresql://user:pass@db-host:25060/meetnote?sslmode=require
+
+# From OpenRouter.ai (free tier available)
+# Sign up at: https://openrouter.ai/keys
+OPENROUTER_API_KEY=sk-or-v1-your-openrouter-key-here
+
+# From DigitalOcean Spaces → API Keys
+# Generate at: https://cloud.digitalocean.com/account/api/spaces
+DO_SPACES_KEY=your_spaces_access_key
+DO_SPACES_SECRET=your_spaces_secret_key
+
+# =============================================================================
+# CONFIGURATION (Set as regular environment variables)
+# =============================================================================
+
+# Application Settings
+ENVIRONMENT=production
+DEBUG=false
+APP_NAME=MeetNote Production
+
+# Whisper AI Configuration
+WHISPER_MODEL=base
+WHISPER_DEVICE=cpu
+WHISPER_COMPUTE_TYPE=int8
+
+# DigitalOcean Spaces Storage
+DO_SPACES_BUCKET=meetnote-production
+DO_SPACES_REGION=nyc3
+
+# CORS Origins (comma-separated)
+CORS_ORIGINS=https://meetnoteapp.netlify.app,https://meetnote-app.netlify.app,chrome-extension://*
+
+# Audio Processing
+SAMPLE_RATE=16000
+CHUNK_DURATION=5
+MAX_AUDIO_SIZE=104857600
+
+# Rate Limiting
+RATE_LIMIT_REQUESTS=100
+RATE_LIMIT_WINDOW=60
+
+# Feature Flags
+ENABLE_REAL_TIME_TRANSCRIPTION=true
+ENABLE_AI_SUMMARIES=true
+ENABLE_AUDIO_COMPRESSION=true
+
+# Logging
+LOG_LEVEL=INFO
+
+# =============================================================================
+# OPTIONAL (for advanced features)
+# =============================================================================
+
+# Redis for caching (optional)
+# REDIS_URL=redis://user:pass@redis-host:port
+
+# Sentry for error tracking (optional)
+# SENTRY_DSN=https://your-sentry-dsn@sentry.io/project-id
+
+# Custom domain (if you have one)
+# CUSTOM_DOMAIN=api.yourdomain.com
+
+# =============================================================================
+# DEPLOYMENT INFORMATION
+# =============================================================================
+
+# Your app will be available at:
+# https://your-app-name.ondigitalocean.app
+
+# Estimated costs:
+# - Professional-XS (1GB RAM): $12/month
+# - Managed PostgreSQL (1GB): $15/month  
+# - Spaces Storage (250GB): $5/month
+# Total: ~$32/month (6+ months with $200 credits)
+
+# Budget alternative:
+# - Basic-XXS (512MB RAM): $5/month
+# - Use Supabase free tier for database
+# Total: $5/month (40 months with $200 credits)

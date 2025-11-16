@@ -15,7 +15,7 @@
     "https://meet.google.com/*",
     "https://*.zoom.us/*",
     "https://teams.microsoft.com/*",
-    "https://meetnote-backend.onrender.com/*",
+    "https://*.ondigitalocean.app/*",
     "http://localhost:8000/*"
   ],
   "background": {

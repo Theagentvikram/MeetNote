@@ -1,0 +1,54 @@
+# DigitalOcean App Platform Budget Dockerfile
+# Designed for 512MB RAM Basic-XXS instance with lightweight setup
+
+FROM python:3.11-slim-bullseye
+
+# Set environment variables
+ENV PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    PIP_NO_CACHE_DIR=1 \
+    DEBIAN_FRONTEND=noninteractive
+
+# Install minimal system dependencies
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    gcc \
+    libc6-dev \
+    libffi-dev \
+    curl \
+    && rm -rf /var/lib/apt/lists/* \
+    && apt-get clean
+
+# Create app directory
+WORKDIR /app
+
+# Create non-root user
+RUN groupadd -r appuser && useradd -r -g appuser -u 1001 appuser
+
+# Copy lightweight requirements
+COPY requirements-simple.txt ./
+
+# Install minimal Python dependencies
+RUN pip install --upgrade pip && \
+    pip install --no-cache-dir -r requirements-simple.txt && \
+    pip cache purge
+
+# Copy application code
+COPY . .
+
+# Create directories with minimal permissions
+RUN mkdir -p /tmp/uploads /tmp/logs && \
+    chown -R appuser:appuser /app /tmp/uploads /tmp/logs && \
+    chmod -R 755 /tmp/uploads /tmp/logs
+
+# Switch to non-root user
+USER appuser
+
+# Expose port
+EXPOSE 8000
+
+# Simple health check
+HEALTHCHECK --interval=60s --timeout=15s --start-period=90s --retries=5 \
+    CMD curl -f http://localhost:8000/api/health || exit 1
+
+# Lightweight startup command
+CMD ["sh", "-c", "uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8000} --workers 1 --log-level warning"]

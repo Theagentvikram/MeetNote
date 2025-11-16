@@ -3,7 +3,7 @@ MeetNote Backend - FastAPI Application
 Audio transcription with Whisper AI and summarization with OpenRouter
 """
 
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException, Depends, UploadFile, File
+from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from contextlib import asynccontextmanager
@@ -126,39 +126,12 @@ async def get_meetings():
         return {"meetings": [], "total": 0}
 
 
-# WebSocket endpoint for real-time transcription
-@app.websocket("/ws/{client_id}")
-async def websocket_endpoint(websocket: WebSocket, client_id: str):
-    """WebSocket connection for real-time audio streaming and transcription"""
-    await ws_manager.connect(websocket, client_id)
-    logger.info(f"Client {client_id} connected via WebSocket")
-    
-    try:
-        while True:
-            # Receive audio data from client
-            data = await websocket.receive_bytes()
-            
-            # Process audio chunk with Whisper
-            transcript = await whisper_service.transcribe_chunk(data)
-            
-            if transcript:
-                # Send transcription back to client
-                await ws_manager.send_personal_message(
-                    {
-                        "type": "transcription",
-                        "text": transcript["text"],
-                        "timestamp": transcript["timestamp"],
-                        "confidence": transcript.get("confidence", 0.0)
-                    },
-                    client_id
-                )
-    
-    except WebSocketDisconnect:
-        ws_manager.disconnect(client_id)
-        logger.info(f"Client {client_id} disconnected")
-    except Exception as e:
-        logger.error(f"WebSocket error for client {client_id}: {str(e)}")
-        ws_manager.disconnect(client_id)
+# WebSocket endpoint for real-time transcription (disabled for lightweight deployment)
+# @app.websocket("/ws/{client_id}")
+# async def websocket_endpoint(websocket: WebSocket, client_id: str):
+#     """WebSocket connection for real-time audio streaming and transcription"""
+#     # Disabled for lightweight deployment - use HTTP endpoints instead
+#     pass
 
 
 # Error handlers
