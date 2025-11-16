@@ -29,11 +29,11 @@ WORKDIR /app
 RUN groupadd -r appuser && useradd -r -g appuser -u 1001 appuser
 
 # Copy requirements first for better caching
-COPY requirements-production.txt ./
+COPY requirements.txt ./
 
 # Install Python dependencies with optimizations
 RUN pip install --upgrade pip setuptools wheel && \
-    pip install --no-cache-dir -r requirements-production.txt && \
+    pip install --no-cache-dir -r requirements.txt && \
     pip cache purge
 
 # Copy application code
