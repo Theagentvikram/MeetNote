@@ -3,7 +3,7 @@ Configuration settings for MeetNote Backend
 """
 
 from pydantic_settings import BaseSettings
-from typing import Optional
+from typing import List, Optional
 import os
 import logging
 
@@ -18,11 +18,17 @@ class Settings(BaseSettings):
     APP_NAME: str = "MeetNote"
     ENVIRONMENT: str = os.getenv("ENVIRONMENT", "development")
     DEBUG: bool = os.getenv("DEBUG", "true").lower() == "true"
+    PORT: int = int(os.getenv("PORT", "8000"))
     
     # API
     API_V1_STR: str = "/api"
     
-    # Database
+    # Supabase Configuration
+    SUPABASE_URL: str = os.getenv("SUPABASE_URL", "")
+    SUPABASE_KEY: str = os.getenv("SUPABASE_KEY", "")
+    SUPABASE_SERVICE_KEY: str = os.getenv("SUPABASE_SERVICE_KEY", "")
+    
+    # Database - Support both Supabase and PostgreSQL
     DATABASE_URL: str = os.getenv(
         "DATABASE_URL",
         "sqlite:///./meetnote.db"  # Default to SQLite for development
@@ -49,19 +55,21 @@ class Settings(BaseSettings):
     # Audio Settings
     SAMPLE_RATE: int = 16000
     CHUNK_DURATION: int = 5  # seconds
-    MAX_AUDIO_SIZE: int = 25 * 1024 * 1024  # 25MB
+    MAX_AUDIO_SIZE: int = int(os.getenv("MAX_AUDIO_SIZE", "25000000"))  # 25MB
     
-    # CORS
-    CORS_ORIGINS: list = [
-        "http://localhost:3000",
-        "http://localhost:3001", 
-        "https://meetnoteapp.netlify.app",
-        "https://meetnote-app.netlify.app",  # Alternative domain
-    ]
+    # CORS - Parse from environment variable
+    CORS_ORIGINS: List[str] = os.getenv(
+        "CORS_ORIGINS", 
+        "http://localhost:3000,http://localhost:3001,https://meetnoteapp.netlify.app,chrome-extension://*"
+    ).split(",")
     
     # File Storage
-    UPLOAD_DIR: str = "./uploads"
+    UPLOAD_DIR: str = os.getenv("AUDIO_UPLOAD_PATH", "./uploads")
     RECORDINGS_DIR: str = "./recordings"
+    TEMP_DIR: str = os.getenv("TEMP_PATH", "./temp")
+    
+    # Logging
+    LOG_LEVEL: str = os.getenv("LOG_LEVEL", "info").upper()
     
     class Config:
         env_file = ".env"

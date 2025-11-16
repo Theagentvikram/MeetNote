@@ -1,32 +1,57 @@
-# Use Python 3.11 alpine for minimal memory footprint (~50MB base)
-FROM python:3.11-alpine
+# Production Dockerfile for MeetNote Backend
+# Optimized for DigitalOcean App Platform and Docker deployment
+FROM python:3.11-slim
+
+# Set environment variables
+ENV PYTHONUNBUFFERED=1
+ENV PYTHONDONTWRITEBYTECODE=1
+ENV DEBIAN_FRONTEND=noninteractive
+
+# Install system dependencies required for audio processing and Whisper
+RUN apt-get update && apt-get install -y \
+    gcc \
+    g++ \
+    make \
+    libffi-dev \
+    libssl-dev \
+    libpq-dev \
+    ffmpeg \
+    libsndfile1 \
+    portaudio19-dev \
+    && rm -rf /var/lib/apt/lists/* \
+    && apt-get clean
 
 # Set working directory
 WORKDIR /app
 
-# Install minimal system dependencies (keep them for numpy)
-RUN apk add --no-cache gcc g++ musl-dev
-
 # Copy requirements first for better Docker layer caching
 COPY requirements.txt .
 
-# Install Python dependencies with minimal cache
-RUN pip install --no-cache-dir --upgrade pip && \
+# Install Python dependencies
+RUN pip install --no-cache-dir --upgrade pip setuptools wheel && \
     pip install --no-cache-dir -r requirements.txt && \
     pip cache purge
 
 # Copy application code
 COPY . .
 
-# Create non-root user and set up directories
-RUN adduser -D -s /bin/sh appuser && \
-    mkdir -p uploads && \
+# Create necessary directories
+RUN mkdir -p uploads recordings logs temp && \
+    chmod 755 uploads recordings logs temp
+
+# Create non-root user for security
+RUN useradd -m -u 1000 appuser && \
     chown -R appuser:appuser /app
 
+# Switch to non-root user
 USER appuser
 
 # Expose port
 EXPOSE 8000
 
-# Run with memory-optimized settings for 512MB limit
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "1", "--loop", "asyncio"]
+# Health check to ensure the app is running
+HEALTHCHECK --interval=30s --timeout=10s --start-period=30s --retries=3 \
+    CMD python -c "import requests; requests.get('http://localhost:8000/', timeout=5)" || exit 1
+
+# Start the application
+CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "1", "--access-log", "--log-level", "info"]
