@@ -39,18 +39,39 @@ class AIService:
             }
         
         try:
-            prompt = f"""You are an AI assistant specialized in analyzing meeting transcripts. Analyze the following meeting transcript and provide:
+            prompt = f"""You are an expert meeting analyst. Analyze this transcript and create a professional meeting summary.
 
-1. A concise summary (2-3 sentences)
-2. Key points discussed (bullet points)
-3. Action items and decisions (if any)
+IMPORTANT INSTRUCTIONS:
+1. Create detailed topic-based sections (not just bullet points)
+2. Include context and specifics from the discussion
+3. Organize information hierarchically with clear headers
+4. Extract precise action items with assignees and deadlines
+5. Be comprehensive - don't oversimplify
 
-Format your response as JSON with keys: summary, key_points (array), action_items (array)
+FORMAT REQUIREMENTS:
+- Start with a brief overview paragraph (2-3 sentences)
+- Group related points into topic sections with descriptive headers
+- Under each topic, provide detailed sub-points with context
+- Action items must include WHO will do WHAT and by WHEN (if mentioned)
+- Use proper formatting with dashes and indentation
 
-Transcript:
+TRANSCRIPT:
 {transcript}
 
-Response:"""
+Provide your response as JSON with this exact structure:
+{{
+  "summary": "2-3 sentence overview of the meeting",
+  "key_points": [
+    "**Topic Header 1**\\n- Detailed point with full context\\n- Another detailed sub-point\\n- Include specifics like names, numbers, dates",
+    "**Topic Header 2**\\n- Complete explanations, not fragments\\n- Show relationships between ideas\\n- Technical details when relevant"
+  ],
+  "action_items": [
+    "**Person Name**: Specific task description with deadline if mentioned",
+    "**Team/Role**: Detailed action with context"
+  ]
+}}
+
+RESPONSE:"""
             
             headers = {
                 "Authorization": f"Bearer {self.api_key}",

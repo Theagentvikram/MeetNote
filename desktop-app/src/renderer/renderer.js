@@ -138,6 +138,55 @@ function setupEventListeners() {
     // Transcript toggle
     elements.transcriptToggle?.addEventListener('click', toggleTranscript);
     
+    // Copy buttons
+    const copySummaryBtn = document.getElementById('copySummary');
+    const copyKeyPointsBtn = document.getElementById('copyKeyPoints');
+    const copyActionItemsBtn = document.getElementById('copyActionItems');
+    const copyTranscriptBtn = document.getElementById('copyTranscript');
+    
+    if (copySummaryBtn) {
+        copySummaryBtn.addEventListener('click', () => {
+            const summaryText = document.getElementById('summaryText');
+            if (summaryText) copyToClipboard(summaryText.textContent, 'copySummary');
+        });
+    }
+    
+    if (copyKeyPointsBtn) {
+        copyKeyPointsBtn.addEventListener('click', () => {
+            const keyPointsList = document.getElementById('keyPointsList');
+            if (keyPointsList) {
+                const text = Array.from(keyPointsList.children)
+                    .map(item => item.textContent.trim())
+                    .filter(text => text && !text.includes('loading') && !text.includes('No'))
+                    .join('\n\n');
+                if (text) copyToClipboard(text, 'copyKeyPoints');
+            }
+        });
+    }
+    
+    if (copyActionItemsBtn) {
+        copyActionItemsBtn.addEventListener('click', () => {
+            const actionItemsList = document.getElementById('actionItemsList');
+            if (actionItemsList) {
+                const text = Array.from(actionItemsList.children)
+                    .map(item => item.textContent.trim())
+                    .filter(text => text && !text.includes('loading') && !text.includes('No'))
+                    .join('\n');
+                if (text) copyToClipboard(text, 'copyActionItems');
+            }
+        });
+    }
+    
+    if (copyTranscriptBtn) {
+        copyTranscriptBtn.addEventListener('click', () => {
+            const transcriptContent = document.getElementById('transcriptContent');
+            if (transcriptContent) {
+                const text = transcriptContent.textContent.trim();
+                if (text && !text.includes('Loading')) copyToClipboard(text, 'copyTranscript');
+            }
+        });
+    }
+    
     // Close modal on background click
     elements.recordingModal?.addEventListener('click', (e) => {
         if (e.target === elements.recordingModal) {
@@ -1243,6 +1292,44 @@ async function showMeetingDetail(meetingId) {
 }
 
 // Update meeting detail view with actual meeting data
+// Format transcript with speaker-separated segments
+function formatTranscriptWithSegments(segments) {
+    if (!segments || segments.length === 0) {
+        return '<p>No transcript available</p>';
+    }
+    
+    let html = '<div class="transcript-segments">';
+    let currentSpeaker = 1;
+    let lastEndTime = 0;
+    
+    segments.forEach((segment, index) => {
+        // Simple heuristic: change speaker if there's a pause > 2 seconds
+        const gap = segment.start - lastEndTime;
+        if (gap > 2 && index > 0) {
+            currentSpeaker = currentSpeaker === 1 ? 2 : 1;
+        }
+        
+        const minutes = Math.floor(segment.start / 60);
+        const seconds = Math.floor(segment.start % 60);
+        const timestamp = `${minutes}:${seconds.toString().padStart(2, '0')}`;
+        
+        html += `
+            <div class="transcript-segment">
+                <div class="segment-header">
+                    <span class="speaker-label speaker-${currentSpeaker}">Speaker ${currentSpeaker}</span>
+                    <span class="segment-time">${timestamp}</span>
+                </div>
+                <div class="segment-text">${segment.text.trim()}</div>
+            </div>
+        `;
+        
+        lastEndTime = segment.end;
+    });
+    
+    html += '</div>';
+    return html;
+}
+
 async function updateMeetingDetailView(meeting) {
     console.log('🔄 Updating meeting detail view with:', meeting);
     
@@ -1277,15 +1364,30 @@ async function updateMeetingDetailView(meeting) {
     // Update transcript in sidebar
     const transcriptElement = document.getElementById('transcriptContent');
     if (transcriptElement) {
-        transcriptElement.textContent = meeting.transcript || 'No transcript available';
+        // Check if we have segments for speaker-separated display
+        if (meeting.segments && meeting.segments.length > 0) {
+            transcriptElement.innerHTML = formatTranscriptWithSegments(meeting.segments);
+        } else {
+            transcriptElement.textContent = meeting.transcript || 'No transcript available';
+        }
     }
     
-    // Generate AI summary with OpenRouter
-    await generateAISummary(meeting.transcript);
+    // Check if AI summary already exists, if not generate it
+    if (meeting.ai_summary && meeting.key_points && meeting.action_items) {
+        console.log('✅ Using cached AI summary');
+        displaySummaryResult({
+            summary: meeting.ai_summary,
+            key_points: meeting.key_points,
+            action_items: meeting.action_items
+        }, document.getElementById('summaryText'), document.getElementById('keyPointsList'), document.getElementById('actionItemsList'));
+    } else {
+        console.log('🔄 Generating new AI summary...');
+        await generateAISummary(meeting.id, meeting.transcript);
+    }
 }
 
 // Generate AI summary using OpenRouter
-async function generateAISummary(transcript) {
+async function generateAISummary(meetingId, transcript) {
     const summaryElement = document.getElementById('summaryText');
     const keyPointsList = document.getElementById('keyPointsList');
     const actionItemsList = document.getElementById('actionItemsList');
@@ -1322,6 +1424,10 @@ async function generateAISummary(transcript) {
             // Generate a simple summary client-side
             const result = generateClientSideSummary(transcript);
             displaySummaryResult(result, summaryElement, keyPointsList, actionItemsList);
+            
+            // Save the summary to meeting
+            saveSummaryToMeeting(meetingId, result);
+            
             showToast('📝 Summary generated (AI endpoint unavailable)', 'info');
             return;
         }
@@ -1334,6 +1440,10 @@ async function generateAISummary(transcript) {
         console.log('✅ AI Summary generated:', result);
         
         displaySummaryResult(result, summaryElement, keyPointsList, actionItemsList);
+        
+        // Save the summary to meeting
+        saveSummaryToMeeting(meetingId, result);
+        
         showToast('✨ AI summary generated!', 'success');
         
     } catch (error) {
@@ -1343,6 +1453,10 @@ async function generateAISummary(transcript) {
         try {
             const fallbackResult = generateClientSideSummary(transcript);
             displaySummaryResult(fallbackResult, summaryElement, keyPointsList, actionItemsList);
+            
+            // Save the summary to meeting
+            saveSummaryToMeeting(meetingId, fallbackResult);
+            
             showToast('📝 Summary generated (fallback mode)', 'info');
         } catch (fallbackError) {
             // Final fallback
@@ -1360,6 +1474,25 @@ async function generateAISummary(transcript) {
     }
 }
 
+// Save AI summary to meeting in localStorage
+function saveSummaryToMeeting(meetingId, summaryResult) {
+    try {
+        const meetings = JSON.parse(localStorage.getItem('meetings') || '[]');
+        const meetingIndex = meetings.findIndex(m => m.id === meetingId);
+        
+        if (meetingIndex !== -1) {
+            meetings[meetingIndex].ai_summary = summaryResult.summary;
+            meetings[meetingIndex].key_points = summaryResult.key_points;
+            meetings[meetingIndex].action_items = summaryResult.action_items;
+            
+            localStorage.setItem('meetings', JSON.stringify(meetings));
+            console.log('💾 AI summary saved to meeting:', meetingId);
+        }
+    } catch (error) {
+        console.error('❌ Failed to save summary:', error);
+    }
+}
+
 // Display summary results in UI
 function displaySummaryResult(result, summaryElement, keyPointsList, actionItemsList) {
     // Update summary
@@ -1367,20 +1500,26 @@ function displaySummaryResult(result, summaryElement, keyPointsList, actionItems
         summaryElement.textContent = result.summary || 'Meeting discussion summary not available';
     }
     
-    // Update key points
+    // Update key points with markdown rendering
     if (keyPointsList && result.key_points && result.key_points.length > 0) {
-        keyPointsList.innerHTML = result.key_points.map(point => `
-            <div class="key-point-item">${point}</div>
-        `).join('');
+        keyPointsList.innerHTML = result.key_points.map(point => {
+            // Convert **text** to <strong>text</strong> and preserve line breaks
+            const formattedPoint = point
+                .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
+                .replace(/\n/g, '<br>');
+            return `<div class="key-point-item">${formattedPoint}</div>`;
+        }).join('');
     } else if (keyPointsList) {
         keyPointsList.innerHTML = '<div class="no-data">No key points identified</div>';
     }
     
-    // Update action items
+    // Update action items with markdown rendering
     if (actionItemsList && result.action_items && result.action_items.length > 0) {
-        actionItemsList.innerHTML = result.action_items.map(item => `
-            <div class="action-item">${item}</div>
-        `).join('');
+        actionItemsList.innerHTML = result.action_items.map(item => {
+            // Convert **text** to <strong>text</strong>
+            const formattedItem = item.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>');
+            return `<div class="action-item">${formattedItem}</div>`;
+        }).join('');
     } else if (actionItemsList) {
         actionItemsList.innerHTML = '<div class="no-data">No action items identified</div>';
     }
@@ -1397,37 +1536,64 @@ function generateClientSideSummary(transcript) {
     const summaryLength = Math.min(3, sentences.length);
     const summary = sentences.slice(0, summaryLength).join(' ').trim();
     
-    // Extract potential key points (look for keywords)
+    // Extract potential key points by topics
     const keyPoints = [];
-    const keywords = ['discussed', 'decided', 'agreed', 'proposed', 'mentioned', 'reviewed', 'planned'];
+    const topicKeywords = {
+        'Discussion Points': ['discussed', 'talked about', 'mentioned', 'brought up', 'covered'],
+        'Decisions Made': ['decided', 'agreed', 'confirmed', 'approved', 'concluded'],
+        'Plans & Next Steps': ['planned', 'will', 'going to', 'next', 'future'],
+        'Questions & Concerns': ['asked', 'questioned', 'concern', 'issue', 'problem'],
+        'Technical Details': ['system', 'code', 'api', 'database', 'model', 'schema']
+    };
     
+    // Group sentences by topics
+    const topicGroups = {};
     sentences.forEach(sentence => {
         const lowerSentence = sentence.toLowerCase();
-        if (keywords.some(keyword => lowerSentence.includes(keyword))) {
-            const cleanSentence = sentence.trim().replace(/^(and|but|so|then)\s+/i, '');
-            if (cleanSentence.length > 20 && keyPoints.length < 5) {
-                keyPoints.push(cleanSentence);
+        for (const [topic, keywords] of Object.entries(topicKeywords)) {
+            if (keywords.some(keyword => lowerSentence.includes(keyword))) {
+                if (!topicGroups[topic]) topicGroups[topic] = [];
+                const cleanSentence = sentence.trim().replace(/^(and|but|so|then)\s+/i, '');
+                if (cleanSentence.length > 20 && topicGroups[topic].length < 3) {
+                    topicGroups[topic].push('- ' + cleanSentence);
+                }
             }
         }
     });
     
-    // Extract action items (look for action words)
+    // Format key points with headers
+    for (const [topic, points] of Object.entries(topicGroups)) {
+        if (points.length > 0) {
+            keyPoints.push(`**${topic}**\n${points.join('\n')}`);
+        }
+    }
+    
+    // Extract action items with assignees
     const actionItems = [];
-    const actionWords = ['will', 'need to', 'should', 'must', 'going to', 'plan to', 'have to'];
+    const actionPatterns = [
+        { regex: /(\w+)\s+will\s+([^\.]+)/gi, format: (name, task) => `**${name}**: ${task.trim()}` },
+        { regex: /(\w+)\s+needs? to\s+([^\.]+)/gi, format: (name, task) => `**${name}**: ${task.trim()}` },
+        { regex: /(\w+)\s+should\s+([^\.]+)/gi, format: (name, task) => `**${name}**: ${task.trim()}` }
+    ];
     
     sentences.forEach(sentence => {
-        const lowerSentence = sentence.toLowerCase();
-        if (actionWords.some(word => lowerSentence.includes(word))) {
-            const cleanSentence = sentence.trim().replace(/^(and|but|so|then)\s+/i, '');
-            if (cleanSentence.length > 20 && actionItems.length < 5) {
-                actionItems.push(cleanSentence);
-            }
-        }
+        actionPatterns.forEach(pattern => {
+            const matches = [...sentence.matchAll(pattern.regex)];
+            matches.forEach(match => {
+                if (match[1] && match[2] && actionItems.length < 5) {
+                    const name = match[1].charAt(0).toUpperCase() + match[1].slice(1);
+                    const task = match[2].trim();
+                    if (task.length > 10) {
+                        actionItems.push(pattern.format(name, task));
+                    }
+                }
+            });
+        });
     });
     
     return {
         summary: summary || 'Meeting transcript available in sidebar.',
-        key_points: keyPoints.length > 0 ? keyPoints : ['Please review the full transcript for details'],
+        key_points: keyPoints.length > 0 ? keyPoints : ['**Note**: AI summarization unavailable - review full transcript for details'],
         action_items: actionItems.length > 0 ? actionItems : []
     };
 }
@@ -1561,6 +1727,71 @@ ipcRenderer.on('stop-recording-signal', () => {
         stopRecording();
     }
 });
+
+// Meeting detection listener
+ipcRenderer.on('meeting-detected', (event, meetingData) => {
+    console.log('📞 Meeting detected:', meetingData);
+    showMeetingDetectionModal(meetingData);
+});
+
+// Show meeting detection modal
+function showMeetingDetectionModal(meetingData) {
+    const modal = document.getElementById('meetingDetectionModal');
+    const meetingType = document.getElementById('meetingType');
+    const meetingName = document.getElementById('meetingName');
+    const startBtn = document.getElementById('startMeetingRecording');
+    const dismissBtn = document.getElementById('dismissMeetingPrompt');
+    
+    if (!modal) return;
+    
+    // Set meeting info
+    if (meetingType) meetingType.textContent = meetingData.type;
+    if (meetingName) meetingName.textContent = meetingData.name;
+    
+    // Show modal
+    modal.style.display = 'flex';
+    
+    // Handle start recording
+    startBtn.onclick = async () => {
+        modal.style.display = 'none';
+        // Auto-start recording with the detected source
+        const result = await ipcRenderer.invoke('start-recording', meetingData.sourceId);
+        if (result.success) {
+            showToast(`🎥 Recording ${meetingData.type} meeting`, 'success');
+        }
+    };
+    
+    // Handle dismiss
+    dismissBtn.onclick = async () => {
+        modal.style.display = 'none';
+        await ipcRenderer.invoke('dismiss-meeting-prompt');
+    };
+}
+
+// Copy functionality
+async function copyToClipboard(text, buttonId) {
+    try {
+        await navigator.clipboard.writeText(text);
+        
+        // Update button state
+        const button = document.getElementById(buttonId);
+        if (button) {
+            button.classList.add('copied');
+            const originalHTML = button.innerHTML;
+            button.innerHTML = '<svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M13.5 4.5l-7 7-3.5-3.5" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>';
+            
+            setTimeout(() => {
+                button.classList.remove('copied');
+                button.innerHTML = originalHTML;
+            }, 2000);
+        }
+        
+        showToast('📋 Copied to clipboard', 'success');
+    } catch (error) {
+        console.error('Copy failed:', error);
+        showToast('❌ Failed to copy', 'error');
+    }
+}
 
 // Authentication functions
 function checkAuthentication() {

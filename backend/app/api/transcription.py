@@ -109,7 +109,8 @@ async def transcribe_audio(request: AudioRequest, req: Request):
             "language": "en",
             "confidence": confidence,
             "audio_format": request.format,
-            "created_at": datetime.now().isoformat()
+            "created_at": datetime.now().isoformat(),
+            "segments": whisper_result.get("segments", []) if USE_PRODUCTION_WHISPER and not whisper_result.get("error") else []
         }
         
         # Store in Supabase if available

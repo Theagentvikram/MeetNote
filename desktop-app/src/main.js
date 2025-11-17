@@ -13,6 +13,12 @@ let mainWindow;
 let tray;
 let isRecording = false;
 let recordingStream = null;
+let meetingDetectionInterval = null;
+let currentMeetingUrl = null;
+let meetingPromptShown = false;
+let meetingDetectionInterval = null;
+let currentMeetingUrl = null;
+let meetingPromptShown = false;
 
 // Backend URL - Updated for DigitalOcean deployment
 const BACKEND_URL = process.env.NODE_ENV === 'development' 
@@ -62,6 +68,12 @@ function createWindow() {
     
     // Check permissions on startup
     checkPermissions();
+    
+    // Start meeting detection
+    startMeetingDetection();
+  });
+    // Start meeting detection
+    startMeetingDetection();
   });
 
   // Handle window closed
@@ -134,6 +146,58 @@ function createTray() {
     });
   } catch (error) {
     console.error('Failed to create tray:', error);
+  }
+}
+
+// Meeting detection - monitor for active meetings
+function startMeetingDetection() {
+  // Check every 5 seconds for active meetings
+  meetingDetectionInterval = setInterval(async () => {
+    if (isRecording || meetingPromptShown) return;
+    
+    try {
+      // Get all windows to detect meeting URLs
+      const sources = await desktopCapturer.getSources({ 
+        types: ['window'], 
+        thumbnailSize: { width: 1, height: 1 } 
+      });
+      
+      // Check for meeting window titles
+      const meetingPatterns = [
+        { pattern: /meet\.google\.com|Google Meet/i, type: 'Google Meet' },
+        { pattern: /zoom\.us|Zoom Meeting/i, type: 'Zoom' },
+        { pattern: /teams\.microsoft\.com|Microsoft Teams/i, type: 'Microsoft Teams' }
+      ];
+      
+      for (const source of sources) {
+        for (const { pattern, type } of meetingPatterns) {
+          if (pattern.test(source.name)) {
+            console.log(`📞 Meeting detected: ${type} - ${source.name}`);
+            currentMeetingUrl = source.name;
+            meetingPromptShown = true;
+            
+            // Show recording prompt
+            if (mainWindow) {
+              mainWindow.webContents.send('meeting-detected', {
+                type,
+                name: source.name,
+                sourceId: source.id
+              });
+            }
+            return;
+          }
+        }
+      }
+    } catch (error) {
+      console.error('Meeting detection error:', error);
+    }
+  }, 5000);
+}
+
+function stopMeetingDetection() {
+  if (meetingDetectionInterval) {
+    clearInterval(meetingDetectionInterval);
+    meetingDetectionInterval = null;
   }
 }
 
@@ -420,11 +484,17 @@ ipcMain.handle('start-recording', async (event, sourceId) => {
 ipcMain.handle('stop-recording', async () => {
   try {
     stopRecording();
+    meetingPromptShown = false; // Reset flag to allow new detection
     return { success: true };
   } catch (error) {
     console.error('Error in stop-recording:', error);
     return { success: false, error: error.message };
   }
+});
+
+ipcMain.handle('dismiss-meeting-prompt', () => {
+  meetingPromptShown = false;
+  return { success: true };
 });
 
 ipcMain.handle('get-backend-url', () => {

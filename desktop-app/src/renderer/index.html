@@ -100,37 +100,101 @@
         <div class="view" id="meetingDetailView">
             <div class="view-content">
                 <div class="meeting-detail-header">
-                    <button class="back-btn" id="backToMeetings">← Back</button>
-                    <div class="meeting-meta">
-                        <h1 class="meeting-title">Loading...</h1>
-                        <div class="meeting-meta">
-                            <span>Loading meeting details...</span>
-                        </div>
-                    </div>
+                    <button class="back-btn" id="backToMeetings">← Back to Meetings</button>
                     <div class="meeting-actions">
-                        <button class="btn-secondary">Share</button>
-                        <button class="btn-secondary">Export</button>
+                        <button class="btn-secondary" id="shareBtn">📤 Share</button>
+                        <button class="btn-secondary" id="exportBtn">💾 Export</button>
+                    </div>
+                </div>
+                
+                <div class="meeting-title-section">
+                    <h1 class="meeting-title">Loading...</h1>
+                    <div class="meeting-metadata">
+                        <span class="meta-item"><span class="meta-icon">📅</span> <span class="meeting-date">Loading...</span></span>
+                        <span class="meta-item"><span class="meta-icon">⏱️</span> <span class="meeting-duration-display">--:--</span></span>
+                        <span class="meta-item"><span class="meta-icon">👤</span> <span class="meeting-organizer-display">Loading...</span></span>
                     </div>
                 </div>
 
-                <div class="meeting-content">
-                    <div class="meeting-summary">
-                        <h3>Summary</h3>
-                        <p class="summary-text">Loading summary...</p>
-                    </div>
-                    
-                    <div class="meeting-transcript">
-                        <h3>Transcript</h3>
-                        <div class="transcript-content">
-                            <p>Loading transcript...</p>
+                <div class="meeting-content-layout">
+                    <!-- Main Content: AI Notes & Summary -->
+                    <div class="meeting-main-content">
+                        <!-- AI Summary Card - Grain Style -->
+                        <div class="summary-card-grain">
+                            <div class="card-header">
+                                <h2>Summary</h2>
+                                <div class="card-header-actions">
+                                    <span class="ai-powered-badge">✨ AI</span>
+                                    <button class="copy-btn" id="copySummary" title="Copy summary">
+                                        <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+                                            <path d="M13 5.5a.5.5 0 0 1 .5.5v9a.5.5 0 0 1-.5.5H6a.5.5 0 0 1-.5-.5V6a.5.5 0 0 1 .5-.5h7zM6 4a1 1 0 0 0-1 1v9a1 1 0 0 0 1 1h7a1 1 0 0 0 1-1V5a1 1 0 0 0-1-1H6z" fill="currentColor"/>
+                                            <path d="M3 1.5h7a.5.5 0 0 1 .5.5v.5h-1V2H3v9h1v1H3a1 1 0 0 1-1-1V2a1 1 0 0 1 1-1z" fill="currentColor"/>
+                                        </svg>
+                                    </button>
+                                </div>
+                            </div>
+                            <div class="summary-text" id="summaryText">Loading AI summary...</div>
+                        </div>
+
+                        <!-- Key Takeaways - Grain Style -->
+                        <div class="takeaways-card">
+                            <div class="card-header">
+                                <h2>Key Takeaways</h2>
+                                <button class="copy-btn" id="copyKeyPoints" title="Copy key points">
+                                    <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+                                        <path d="M13 5.5a.5.5 0 0 1 .5.5v9a.5.5 0 0 1-.5.5H6a.5.5 0 0 1-.5-.5V6a.5.5 0 0 1 .5-.5h7zM6 4a1 1 0 0 0-1 1v9a1 1 0 0 0 1 1h7a1 1 0 0 0 1-1V5a1 1 0 0 0-1-1H6z" fill="currentColor"/>
+                                        <path d="M3 1.5h7a.5.5 0 0 1 .5.5v.5h-1V2H3v9h1v1H3a1 1 0 0 1-1-1V2a1 1 0 0 1 1-1z" fill="currentColor"/>
+                                    </svg>
+                                </button>
+                            </div>
+                            <div class="key-points-list" id="keyPointsList">
+                                <div class="loading">Analyzing meeting...</div>
+                            </div>
+                        </div>
+
+                        <!-- Action Items - Grain Style -->
+                        <div class="action-items-card">
+                            <div class="card-header">
+                                <h2>Action Items</h2>
+                                <button class="copy-btn" id="copyActionItems" title="Copy action items">
+                                    <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+                                        <path d="M13 5.5a.5.5 0 0 1 .5.5v9a.5.5 0 0 1-.5.5H6a.5.5 0 0 1-.5-.5V6a.5.5 0 0 1 .5-.5h7zM6 4a1 1 0 0 0-1 1v9a1 1 0 0 0 1 1h7a1 1 0 0 0 1-1V5a1 1 0 0 0-1-1H6z" fill="currentColor"/>
+                                        <path d="M3 1.5h7a.5.5 0 0 1 .5.5v.5h-1V2H3v9h1v1H3a1 1 0 0 1-1-1V2a1 1 0 0 1 1-1z" fill="currentColor"/>
+                                    </svg>
+                                </button>
+                            </div>
+                            <div class="action-items-list" id="actionItemsList">
+                                <div class="loading">Extracting action items...</div>
+                            </div>
                         </div>
                     </div>
-                    
-                    <div class="meeting-participants">
-                        <h3>Participants</h3>
-                        <div class="organizer-info">
-                            <div class="organizer-name">Loading...</div>
-                            <div class="organizer-role">Meeting Organizer</div>
+
+                    <!-- Transcript Sidebar - Grain Style -->
+                    <div class="transcript-sidebar">
+                        <div class="transcript-panel-grain">
+                            <div class="transcript-header-grain">
+                                <div class="transcript-title">
+                                    <span class="transcript-icon">📝</span>
+                                    <h3>Transcript</h3>
+                                </div>
+                                <div class="transcript-header-actions">
+                                    <button class="copy-btn" id="copyTranscript" title="Copy transcript">
+                                        <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+                                            <path d="M13 5.5a.5.5 0 0 1 .5.5v9a.5.5 0 0 1-.5.5H6a.5.5 0 0 1-.5-.5V6a.5.5 0 0 1 .5-.5h7zM6 4a1 1 0 0 0-1 1v9a1 1 0 0 0 1 1h7a1 1 0 0 0 1-1V5a1 1 0 0 0-1-1H6z" fill="currentColor"/>
+                                            <path d="M3 1.5h7a.5.5 0 0 1 .5.5v.5h-1V2H3v9h1v1H3a1 1 0 0 1-1-1V2a1 1 0 0 1 1-1z" fill="currentColor"/>
+                                        </svg>
+                                    </button>
+                                    <button class="collapse-btn" id="toggleTranscript" title="Collapse">
+                                        <span>−</span>
+                                    </button>
+                                </div>
+                            </div>
+                            <div class="transcript-search">
+                                <input type="text" placeholder="Search transcript..." class="transcript-search-input" id="transcriptSearch">
+                            </div>
+                            <div class="transcript-content-grain" id="transcriptContent">
+                                <p>Loading transcript...</p>
+                            </div>
                         </div>
                     </div>
                 </div>
@@ -288,6 +352,29 @@
     </div>
 
     <!-- In-app overlay removed - using system overlay only -->
+
+    <!-- Meeting Detection Modal -->
+    <div class="modal-overlay" id="meetingDetectionModal" style="display: none;">
+        <div class="modal meeting-detection-modal">
+            <div class="modal-header">
+                <h2>📞 Meeting Detected</h2>
+            </div>
+            <div class="modal-content meeting-detection-content">
+                <div class="meeting-detection-icon">🎥</div>
+                <p class="meeting-detection-message">
+                    Would you like to start recording this <strong id="meetingType">meeting</strong>?
+                </p>
+                <p class="meeting-detection-subtitle" id="meetingName"></p>
+                <div class="modal-actions">
+                    <button class="btn-secondary" id="dismissMeetingPrompt">Not Now</button>
+                    <button class="btn-primary" id="startMeetingRecording">
+                        <span class="record-icon-small"></span>
+                        Start Recording
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
 
     <!-- Login Modal removed - no forced authentication -->
 

@@ -3,7 +3,7 @@
  */
 
 // Auto-detect environment
-let API_BASE_URL = 'https://meetnote-backend.onrender.com';  // Production default
+let API_BASE_URL = 'https://orca-app-n4f3w.ondigitalocean.app';  // Production default
 
 // For local development, check if local server is available
 async function detectEnvironment() {
@@ -17,7 +17,7 @@ async function detectEnvironment() {
       console.log('Using local development server');
     }
   } catch (error) {
-    console.log('Using production server');
+    console.log('Using production server:', API_BASE_URL);
   }
 }
 

@@ -27,11 +27,7 @@
   },
   "dependencies": {
     "axios": "^1.6.0",
-    "electron-store": "^8.1.0",
-    "node-record-lpcm16": "^1.0.1",
-    "speaker": "^0.5.4",
-    "wav": "^1.0.2",
-    "whisper-node": "^1.1.1"
+    "electron-store": "^8.1.0"
   },
   "build": {
     "appId": "com.meetnote.desktop",
