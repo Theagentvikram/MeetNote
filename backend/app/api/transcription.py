@@ -7,15 +7,25 @@ from pydantic import BaseModel
 from typing import Optional
 import logging
 import uuid
+import base64
 from datetime import datetime
 
-# Try to import lightweight Whisper, fall back to mock if not available
-try:
-    from app.services.lightweight_whisper import lightweight_whisper
+from app.core.config import settings
+
+# Determine which whisper backend to use
+USE_PRODUCTION_WHISPER = settings.ENVIRONMENT.lower() == "production"
+
+if USE_PRODUCTION_WHISPER:
+    from app.services.production_whisper import whisper_service as production_whisper
     WHISPER_AVAILABLE = True
-except ImportError:
-    WHISPER_AVAILABLE = False
-    lightweight_whisper = None
+else:
+    # Try to import lightweight Whisper, fall back to mock if not available
+    try:
+        from app.services.lightweight_whisper import lightweight_whisper
+        WHISPER_AVAILABLE = True
+    except ImportError:
+        WHISPER_AVAILABLE = False
+        lightweight_whisper = None
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -41,9 +51,23 @@ async def transcribe_audio(request: AudioRequest, req: Request):
         # Estimate duration based on audio data size (rough approximation)
         audio_size = len(request.audio_data)
         estimated_duration = max(5, min(300, audio_size // 1000))
+        transcript = ""
+        summary = ""
+        confidence = 0.0
         
-        # Try to use lightweight Whisper if available, otherwise use mock
-        if WHISPER_AVAILABLE and lightweight_whisper:
+        if USE_PRODUCTION_WHISPER:
+            audio_bytes = base64.b64decode(request.audio_data)
+            whisper_result = await production_whisper.transcribe_audio(audio_bytes)
+            if whisper_result.get("error"):
+                logger.warning(f"⚠️ Production Whisper reported error, using mock: {whisper_result}")
+                transcript, summary, confidence = _generate_mock_transcript(estimated_duration)
+            else:
+                transcript = whisper_result.get("text", "")
+                confidence = whisper_result.get("confidence", 0.85)
+                estimated_duration = int(whisper_result.get("audio_duration", estimated_duration))
+                summary = f"Whisper production transcription for {estimated_duration}s recording"
+                logger.info(f"✅ Production Whisper transcribed {estimated_duration}s audio")
+        elif WHISPER_AVAILABLE and lightweight_whisper:
             try:
                 # Initialize Whisper if not already done
                 if not lightweight_whisper.is_ready():

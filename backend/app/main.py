@@ -22,7 +22,7 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# Initialize services (removed heavy dependencies for lightweight deployment)
+USE_PRODUCTION_WHISPER = settings.ENVIRONMENT.lower() == "production"
 
 
 @asynccontextmanager
@@ -34,8 +34,8 @@ async def lifespan(app: FastAPI):
     
     # Initialize Supabase client
     try:
-        supabase_url = os.getenv("SUPABASE_URL")
-        supabase_key = os.getenv("SUPABASE_KEY")
+        supabase_url = settings.SUPABASE_URL
+        supabase_key = settings.SUPABASE_KEY
         
         if supabase_url and supabase_key:
             app.state.supabase = create_client(supabase_url, supabase_key)
@@ -47,8 +47,10 @@ async def lifespan(app: FastAPI):
         logger.warning(f"⚠️ Supabase initialization failed: {e}")
         app.state.supabase = None
     
-    # Note: Using mock transcription for lightweight deployment
-    logger.info("✅ Backend ready with mock transcription")
+    if USE_PRODUCTION_WHISPER:
+        logger.info("✅ Backend ready with production Whisper pipeline")
+    else:
+        logger.info("✅ Backend ready with mock transcription")
     
     yield
     
@@ -96,12 +98,13 @@ async def root():
 async def health_check():
     """Health check endpoint for frontend"""
     database_status = "connected" if hasattr(app.state, 'supabase') and app.state.supabase else "disconnected"
+    whisper_status = "production" if USE_PRODUCTION_WHISPER else "mock"
     return {
         "status": "healthy",
         "timestamp": "2025-11-16T18:48:39.281446",
         "version": "2.0.0",
         "database": f"supabase ({database_status})",
-        "whisper": "mock_available"
+        "whisper": whisper_status
     }
 
 

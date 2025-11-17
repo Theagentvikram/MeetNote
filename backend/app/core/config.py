@@ -3,7 +3,8 @@ Configuration settings for MeetNote Backend
 """
 
 from pydantic_settings import BaseSettings
-from typing import List, Optional
+from pydantic import field_validator
+from typing import List, Optional, Union
 import os
 import logging
 
@@ -58,10 +59,12 @@ class Settings(BaseSettings):
     MAX_AUDIO_SIZE: int = int(os.getenv("MAX_AUDIO_SIZE", "25000000"))  # 25MB
     
     # CORS - Parse from environment variable
-    CORS_ORIGINS: List[str] = os.getenv(
-        "CORS_ORIGINS", 
-        "http://localhost:3000,http://localhost:3001,https://meetnoteapp.netlify.app,chrome-extension://*"
-    ).split(",")
+    CORS_ORIGINS: List[str] = [
+        "http://localhost:3000",
+        "http://localhost:3001",
+        "https://meetnoteapp.netlify.app",
+        "chrome-extension://*",
+    ]
     
     # File Storage
     UPLOAD_DIR: str = os.getenv("AUDIO_UPLOAD_PATH", "./uploads")
@@ -74,6 +77,16 @@ class Settings(BaseSettings):
     class Config:
         env_file = ".env"
         case_sensitive = True
+
+    @field_validator("CORS_ORIGINS", mode="before")
+    @classmethod
+    def split_cors_origins(cls, value: Union[str, List[str]]) -> List[str]:
+        """Accept JSON arrays or comma-separated strings from env."""
+        if isinstance(value, list):
+            return value
+        if isinstance(value, str):
+            return [origin.strip() for origin in value.split(",") if origin.strip()]
+        return value
 
 
 settings = Settings()
