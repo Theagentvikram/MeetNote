@@ -38,7 +38,12 @@ async def lifespan(app: FastAPI):
         supabase_key = settings.SUPABASE_KEY
         
         if supabase_url and supabase_key:
-            app.state.supabase = create_client(supabase_url, supabase_key)
+            # Simple initialization without proxy parameter
+            from supabase import create_client, Client
+            app.state.supabase: Client = create_client(
+                supabase_url=supabase_url,
+                supabase_key=supabase_key
+            )
             logger.info("✅ Supabase client initialized")
         else:
             logger.warning("⚠️ Supabase credentials missing, running without database")

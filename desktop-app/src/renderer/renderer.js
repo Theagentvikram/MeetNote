@@ -1503,8 +1503,11 @@ function displaySummaryResult(result, summaryElement, keyPointsList, actionItems
     // Update key points with markdown rendering
     if (keyPointsList && result.key_points && result.key_points.length > 0) {
         keyPointsList.innerHTML = result.key_points.map(point => {
+            // First, replace literal \n with actual newlines if they exist
+            let processedPoint = point.replace(/\\n/g, '\n');
+            
             // Convert **text** to <strong>text</strong> and preserve line breaks
-            const formattedPoint = point
+            const formattedPoint = processedPoint
                 .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
                 .replace(/\n/g, '<br>');
             return `<div class="key-point-item">${formattedPoint}</div>`;
@@ -1516,8 +1519,13 @@ function displaySummaryResult(result, summaryElement, keyPointsList, actionItems
     // Update action items with markdown rendering
     if (actionItemsList && result.action_items && result.action_items.length > 0) {
         actionItemsList.innerHTML = result.action_items.map(item => {
-            // Convert **text** to <strong>text</strong>
-            const formattedItem = item.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>');
+            // Replace literal \n with actual newlines
+            let processedItem = item.replace(/\\n/g, '\n');
+            
+            // Convert **text** to <strong>text</strong> and preserve line breaks
+            const formattedItem = processedItem
+                .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
+                .replace(/\n/g, '<br>');
             return `<div class="action-item">${formattedItem}</div>`;
         }).join('');
     } else if (actionItemsList) {

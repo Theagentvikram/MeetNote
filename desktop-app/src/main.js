@@ -16,9 +16,6 @@ let recordingStream = null;
 let meetingDetectionInterval = null;
 let currentMeetingUrl = null;
 let meetingPromptShown = false;
-let meetingDetectionInterval = null;
-let currentMeetingUrl = null;
-let meetingPromptShown = false;
 
 // Backend URL - Updated for DigitalOcean deployment
 const BACKEND_URL = process.env.NODE_ENV === 'development' 
@@ -69,9 +66,6 @@ function createWindow() {
     // Check permissions on startup
     checkPermissions();
     
-    // Start meeting detection
-    startMeetingDetection();
-  });
     // Start meeting detection
     startMeetingDetection();
   });

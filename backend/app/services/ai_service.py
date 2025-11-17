@@ -58,12 +58,18 @@ FORMAT REQUIREMENTS:
 TRANSCRIPT:
 {transcript}
 
-Provide your response as JSON with this exact structure:
+Provide your response as JSON with this exact structure (use actual newline characters, not escaped):
 {{
   "summary": "2-3 sentence overview of the meeting",
   "key_points": [
-    "**Topic Header 1**\\n- Detailed point with full context\\n- Another detailed sub-point\\n- Include specifics like names, numbers, dates",
-    "**Topic Header 2**\\n- Complete explanations, not fragments\\n- Show relationships between ideas\\n- Technical details when relevant"
+    "**Topic Header 1**
+- Detailed point with full context
+- Another detailed sub-point
+- Include specifics like names, numbers, dates",
+    "**Topic Header 2**
+- Complete explanations, not fragments
+- Show relationships between ideas
+- Technical details when relevant"
   ],
   "action_items": [
     "**Person Name**: Specific task description with deadline if mentioned",
