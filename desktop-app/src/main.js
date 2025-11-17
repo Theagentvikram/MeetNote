@@ -17,7 +17,7 @@ let recordingStream = null;
 // Backend URL - Updated for DigitalOcean deployment
 const BACKEND_URL = process.env.NODE_ENV === 'development' 
   ? 'http://localhost:8000' 
-  : process.env.BACKEND_URL || 'https://meetnote-production.ondigitalocean.app';
+  : process.env.BACKEND_URL || 'https://orca-app-n4f3w.ondigitalocean.app';
 
 // App configuration
 const isDev = process.env.NODE_ENV === 'development';
@@ -55,6 +55,11 @@ function createWindow() {
   mainWindow.once('ready-to-show', () => {
     mainWindow.show();
     
+    // Open DevTools only in development mode
+    if (isDev) {
+      mainWindow.webContents.openDevTools();
+    }
+    
     // Check permissions on startup
     checkPermissions();
   });
@@ -71,59 +76,65 @@ function createWindow() {
       mainWindow.hide();
     }
   });
-
-  // Open DevTools in development
-  if (isDev) {
-    mainWindow.webContents.openDevTools();
-  }
 }
 
 function createTray() {
-  // Create tray icon
-  const trayIconPath = path.join(__dirname, '../assets/tray-icon.png');
-  tray = new Tray(trayIconPath);
-  
-  const contextMenu = Menu.buildFromTemplate([
-    {
-      label: 'Show MeetNote',
-      click: () => {
+  try {
+    // Create tray icon
+    const trayIconPath = path.join(__dirname, '../assets/tray-icon.png');
+    
+    // Check if icon exists
+    if (!fs.existsSync(trayIconPath)) {
+      console.log('Tray icon not found, skipping tray creation');
+      return;
+    }
+    
+    tray = new Tray(trayIconPath);
+    
+    const contextMenu = Menu.buildFromTemplate([
+      {
+        label: 'Show MeetNote',
+        click: () => {
+          mainWindow.show();
+        }
+      },
+      {
+        label: 'Start Recording',
+        click: () => {
+          startRecording();
+        },
+        enabled: !isRecording
+      },
+      {
+        label: 'Stop Recording',
+        click: () => {
+          stopRecording();
+        },
+        enabled: isRecording
+      },
+      { type: 'separator' },
+      {
+        label: 'Quit',
+        click: () => {
+          app.quit();
+        }
+      }
+    ]);
+    
+    tray.setContextMenu(contextMenu);
+    tray.setToolTip('MeetNote - AI Meeting Assistant');
+    
+    // Show window on tray click
+    tray.on('click', () => {
+      if (mainWindow.isVisible()) {
+        mainWindow.hide();
+      } else {
         mainWindow.show();
       }
-    },
-    {
-      label: 'Start Recording',
-      click: () => {
-        startRecording();
-      },
-      enabled: !isRecording
-    },
-    {
-      label: 'Stop Recording',
-      click: () => {
-        stopRecording();
-      },
-      enabled: isRecording
-    },
-    { type: 'separator' },
-    {
-      label: 'Quit',
-      click: () => {
-        app.quit();
-      }
-    }
-  ]);
-  
-  tray.setContextMenu(contextMenu);
-  tray.setToolTip('MeetNote - AI Meeting Assistant');
-  
-  // Show window on tray click
-  tray.on('click', () => {
-    if (mainWindow.isVisible()) {
-      mainWindow.hide();
-    } else {
-      mainWindow.show();
-    }
-  });
+    });
+  } catch (error) {
+    console.error('Failed to create tray:', error);
+  }
 }
 
 async function checkPermissions() {

@@ -120,6 +120,12 @@ function setupEventListeners() {
         switchView('meetings');
     });
     
+    // Transcript toggle
+    const toggleTranscriptBtn = document.getElementById('toggleTranscript');
+    if (toggleTranscriptBtn) {
+        toggleTranscriptBtn.addEventListener('click', toggleTranscriptPanel);
+    }
+    
     // Settings
     elements.saveSettingsBtn?.addEventListener('click', saveSettings);
     
@@ -471,10 +477,14 @@ function handleRecordingOption(optionType) {
 // Start desktop audio capture automatically
 async function startDesktopAudioCapture() {
     try {
-        console.log('Starting desktop audio capture...');
+        console.log('🎙️ === STARTING DESKTOP AUDIO CAPTURE ===');
+        console.log('⏰ Starting at:', new Date().toISOString());
         
         // Check permissions first
+        console.log('🔐 Checking audio permissions...');
         const hasPermissions = await ipcRenderer.invoke('check-audio-permissions');
+        console.log('🔐 Audio permissions granted:', hasPermissions);
+        
         if (!hasPermissions) {
             showToast('Audio permissions required. Please grant access in System Preferences.', 'error');
             return;
@@ -482,6 +492,8 @@ async function startDesktopAudioCapture() {
         
         // Start audio-only recording
         showToast('Starting audio capture...', 'info');
+        
+        console.log('🎤 Requesting microphone access...');
         
         // Get system audio stream (no video)
         const stream = await navigator.mediaDevices.getUserMedia({
@@ -495,15 +507,36 @@ async function startDesktopAudioCapture() {
             video: false
         });
         
+        console.log('✅ Got media stream!');
+        console.log('🎤 Stream ID:', stream.id);
+        console.log('🎤 Stream active:', stream.active);
+        console.log('🎤 Audio tracks:', stream.getAudioTracks().length);
+        
+        // Test if audio is actually coming through
+        stream.getAudioTracks().forEach((track, i) => {
+            console.log(`🎤 Track ${i}:`, {
+                id: track.id,
+                label: track.label,
+                enabled: track.enabled,
+                muted: track.muted,
+                readyState: track.readyState
+            });
+        });
+        
         // Start recording with the audio stream
         await startAudioRecording(stream);
         
     } catch (error) {
-        console.error('Desktop audio capture error:', error);
+        console.error('❌ Desktop audio capture error:', error);
+        console.error('❌ Error name:', error.name);
+        console.error('❌ Error message:', error.message);
+        
         if (error.name === 'NotAllowedError') {
             showToast('Audio permission denied. Please allow microphone access.', 'error');
+        } else if (error.name === 'NotFoundError') {
+            showToast('No microphone found. Please connect a microphone.', 'error');
         } else {
-            showToast('Failed to start audio capture', 'error');
+            showToast('Failed to start audio capture: ' + error.message, 'error');
         }
     }
 }
@@ -551,21 +584,85 @@ function handleFileUpload() {
 // Start audio-only recording with REAL speech recognition
 async function startAudioRecording(stream) {
     try {
-        // Set up MediaRecorder for audio only
-        mediaRecorder = new MediaRecorder(stream, {
-            mimeType: 'audio/webm;codecs=opus'
+        console.log('🎙️ === STARTING AUDIO RECORDING ===');
+        
+        // Check if stream has audio tracks
+        const audioTracks = stream.getAudioTracks();
+        console.log('🎤 Audio tracks:', audioTracks.length);
+        if (audioTracks.length === 0) {
+            throw new Error('No audio tracks available in stream');
+        }
+        
+        audioTracks.forEach((track, index) => {
+            console.log(`🎤 Track ${index}:`, {
+                label: track.label,
+                enabled: track.enabled,
+                muted: track.muted,
+                readyState: track.readyState,
+                settings: track.getSettings()
+            });
         });
         
+        // Set recording start time
+        recordingStartTime = Date.now();
+        console.log('⏰ Recording start time:', new Date(recordingStartTime).toISOString());
+        
+        // Set up MediaRecorder for audio only
+        const options = { mimeType: 'audio/webm;codecs=opus' };
+        
+        // Check if the mimeType is supported
+        if (!MediaRecorder.isTypeSupported(options.mimeType)) {
+            console.warn('⚠️ audio/webm;codecs=opus not supported, trying alternatives...');
+            const alternatives = [
+                'audio/webm',
+                'audio/ogg;codecs=opus',
+                'audio/mp4'
+            ];
+            
+            for (const alt of alternatives) {
+                if (MediaRecorder.isTypeSupported(alt)) {
+                    options.mimeType = alt;
+                    console.log('✅ Using alternative:', alt);
+                    break;
+                }
+            }
+        }
+        
+        console.log('🎬 Creating MediaRecorder with:', options);
+        mediaRecorder = new MediaRecorder(stream, options);
+        
         recordedChunks = [];
+        console.log('📦 Cleared recorded chunks array');
         
         mediaRecorder.ondataavailable = (event) => {
+            console.log('📡 ondataavailable event fired, data size:', event.data.size, 'bytes');
             if (event.data.size > 0) {
+                console.log('🎵 Audio chunk received:', event.data.size, 'bytes');
                 recordedChunks.push(event.data);
+                console.log('📊 Total chunks so far:', recordedChunks.length);
+                
+                // Calculate total size
+                const totalSize = recordedChunks.reduce((sum, chunk) => sum + chunk.size, 0);
+                console.log('📦 Total audio data so far:', totalSize, 'bytes');
+            } else {
+                console.warn('⚠️ Empty audio chunk received (size: 0)');
             }
         };
         
+        mediaRecorder.onerror = (event) => {
+            console.error('❌ MediaRecorder error:', event.error);
+        };
+        
         mediaRecorder.onstop = async () => {
-            console.log('Audio recording stopped');
+            const duration = Math.floor((Date.now() - recordingStartTime) / 1000);
+            console.log('⏹️ Audio recording stopped');
+            console.log('⏱️ Recording duration:', duration, 'seconds');
+            console.log('📊 Total chunks recorded:', recordedChunks.length);
+            
+            // Calculate total size
+            const totalSize = recordedChunks.reduce((sum, chunk) => sum + chunk.size, 0);
+            console.log('📦 Total audio data:', totalSize, 'bytes');
+            
             await processAudioRecording();
         };
         
@@ -573,7 +670,11 @@ async function startAudioRecording(stream) {
         startSpeechRecognition();
         
         // Start recording
+        console.log('▶️ Starting MediaRecorder with timeslice: 1000ms');
         mediaRecorder.start(1000); // Collect data every second
+        console.log('✅ MediaRecorder started successfully');
+        console.log('🎙️ MediaRecorder state:', mediaRecorder.state);
+        console.log('🎙️ MediaRecorder mimeType:', mediaRecorder.mimeType);
         isRecording = true;
         
         // Update UI
@@ -584,8 +685,9 @@ async function startAudioRecording(stream) {
         showToast('🎤 Recording with live transcription!', 'success');
         
     } catch (error) {
-        console.error('Start audio recording error:', error);
-        showToast('Failed to start audio recording', 'error');
+        console.error('❌ Start audio recording error:', error);
+        console.error('❌ Error stack:', error.stack);
+        showToast('Failed to start audio recording: ' + error.message, 'error');
     }
 }
 
@@ -637,34 +739,138 @@ async function processAudioRecording() {
         
         showToast('🔄 Transcribing with Whisper AI...', 'info');
         
-        // Create audio blob and save to temporary file
+        // Create audio blob
         const audioBlob = new Blob(recordedChunks, { type: 'audio/webm;codecs=opus' });
         console.log('🎵 Audio blob size:', audioBlob.size, 'bytes');
+        
+        // Convert WebM to WAV format for better backend compatibility
+        console.log('🔄 Converting audio to WAV format...');
+        const wavBlob = await convertWebMToWAV(audioBlob);
+        console.log('🎵 WAV blob size:', wavBlob.size, 'bytes');
         
         // Convert to base64 for backend API
         const reader = new FileReader();
         const base64Audio = await new Promise((resolve) => {
             reader.onloadend = () => {
-                const base64 = reader.result.split(',')[1]; // Remove data:audio/webm;base64, prefix
+                const base64 = reader.result.split(',')[1]; // Remove data:audio/wav;base64, prefix
                 resolve(base64);
             };
-            reader.readAsDataURL(audioBlob);
+            reader.readAsDataURL(wavBlob);
         });
         
+        console.log('📦 Base64 audio length:', base64Audio.length, 'characters');
+        
         // Send to backend for REAL Whisper transcription
-        const transcriptionResult = await sendAudioForTranscription(base64Audio);
+        const transcriptionResult = await sendAudioForTranscription(base64Audio, 'wav');
         
         console.log('✅ Backend transcription result:', transcriptionResult);
         
-        // Backend already stored the meeting in Supabase, just refresh the UI
+        // Save meeting locally (no database dependency)
+        const meeting = {
+            id: transcriptionResult.id || Date.now().toString(),
+            title: transcriptionResult.title || `Meeting Recording - ${new Date().toLocaleString()}`,
+            transcript: transcriptionResult.transcript || 'No transcript available',
+            summary: transcriptionResult.summary || 'No summary available',
+            duration: transcriptionResult.duration || Math.floor((Date.now() - recordingStartTime) / 1000),
+            language: transcriptionResult.language || 'en',
+            confidence: transcriptionResult.confidence || 0,
+            created_at: new Date().toISOString(),
+            timestamp: Date.now()
+        };
+        
+        console.log('💾 Saving meeting locally:', meeting);
+        saveMeetingLocally(meeting);
+        
+        // Refresh the UI
         await loadRecordedMeetings();
         switchView('meetings');
-        showToast('✅ Meeting transcribed and saved!', 'success');
+        showToast('✅ Meeting transcribed and saved locally!', 'success');
         
     } catch (error) {
         console.error('Backend transcription error:', error);
         showToast('❌ Failed to process recording', 'error');
         switchView('meetings');
+    }
+}
+
+// Convert WebM to WAV format using Web Audio API
+async function convertWebMToWAV(webmBlob) {
+    try {
+        console.log('🎵 Converting WebM to WAV using Web Audio API...');
+        
+        // Create an audio context
+        const audioContext = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: 16000 });
+        
+        // Read the WebM blob as ArrayBuffer
+        const arrayBuffer = await webmBlob.arrayBuffer();
+        
+        // Decode the audio data
+        console.log('🔊 Decoding audio...');
+        const audioBuffer = await audioContext.decodeAudioData(arrayBuffer);
+        console.log('✅ Audio decoded:', audioBuffer.duration, 'seconds');
+        
+        // Get audio data
+        const channelData = audioBuffer.getChannelData(0); // Get first channel (mono)
+        const sampleRate = audioBuffer.sampleRate;
+        const numChannels = 1; // Mono
+        const bitsPerSample = 16;
+        
+        // Create WAV file
+        const wavBuffer = encodeWAV(channelData, sampleRate, numChannels, bitsPerSample);
+        const wavBlob = new Blob([wavBuffer], { type: 'audio/wav' });
+        
+        console.log('✅ WAV conversion complete');
+        return wavBlob;
+        
+    } catch (error) {
+        console.error('❌ WAV conversion failed:', error);
+        // Return original blob if conversion fails
+        console.warn('⚠️ Using original WebM blob');
+        return webmBlob;
+    }
+}
+
+// Encode PCM audio data to WAV format
+function encodeWAV(samples, sampleRate, numChannels, bitsPerSample) {
+    const bytesPerSample = bitsPerSample / 8;
+    const blockAlign = numChannels * bytesPerSample;
+    
+    const buffer = new ArrayBuffer(44 + samples.length * bytesPerSample);
+    const view = new DataView(buffer);
+    
+    // WAV header
+    writeString(view, 0, 'RIFF');
+    view.setUint32(4, 36 + samples.length * bytesPerSample, true);
+    writeString(view, 8, 'WAVE');
+    writeString(view, 12, 'fmt ');
+    view.setUint32(16, 16, true); // PCM format
+    view.setUint16(20, 1, true); // Linear PCM
+    view.setUint16(22, numChannels, true);
+    view.setUint32(24, sampleRate, true);
+    view.setUint32(28, sampleRate * blockAlign, true);
+    view.setUint16(32, blockAlign, true);
+    view.setUint16(34, bitsPerSample, true);
+    writeString(view, 36, 'data');
+    view.setUint32(40, samples.length * bytesPerSample, true);
+    
+    // Write PCM samples
+    floatTo16BitPCM(view, 44, samples);
+    
+    return buffer;
+}
+
+// Helper function to write string to DataView
+function writeString(view, offset, string) {
+    for (let i = 0; i < string.length; i++) {
+        view.setUint8(offset + i, string.charCodeAt(i));
+    }
+}
+
+// Convert float samples to 16-bit PCM
+function floatTo16BitPCM(view, offset, input) {
+    for (let i = 0; i < input.length; i++, offset += 2) {
+        const s = Math.max(-1, Math.min(1, input[i]));
+        view.setInt16(offset, s < 0 ? s * 0x8000 : s * 0x7FFF, true);
     }
 }
 
@@ -679,6 +885,7 @@ function createMockMeeting() {
         summary: 'Audio recording completed (offline mode)',
         transcript: 'Audio was recorded but transcription service is unavailable. Please check your backend connection.',
         organizer: user ? user.name : 'You',
+
         participants: 1
     };
     
@@ -695,9 +902,24 @@ function createMockMeeting() {
 }
 
 // Send audio to backend for transcription
-async function sendAudioForTranscription(base64Audio) {
+async function sendAudioForTranscription(base64Audio, format = 'wav') {
     try {
+        console.log('🌐 === SENDING TO BACKEND ===');
+        console.log('📍 Backend URL:', backendUrl);
+        console.log('🎵 Audio format:', format);
+        console.log('📊 Base64 audio length:', base64Audio.length, 'characters');
+        console.log('📦 First 100 chars of base64:', base64Audio.substring(0, 100));
+        
         showToast('🔄 Transcribing with AI...', 'info');
+        
+        const requestBody = {
+            audio_data: base64Audio,
+            format: format,
+            title: `Meeting Recording - ${new Date().toLocaleString()}`
+        };
+        
+        console.log('📤 Sending request to:', `${backendUrl}/api/transcription/audio`);
+        console.log('📤 Request body size:', JSON.stringify(requestBody).length, 'bytes');
         
         // Try to use real backend
         const response = await fetch(`${backendUrl}/api/transcription/audio`, {
@@ -705,28 +927,33 @@ async function sendAudioForTranscription(base64Audio) {
             headers: {
                 'Content-Type': 'application/json',
             },
-            body: JSON.stringify({
-                audio_data: base64Audio,
-                format: 'webm'
-            })
+            body: JSON.stringify(requestBody)
         });
+        
+        console.log('📥 Response status:', response.status, response.statusText);
         
         if (response.ok) {
             const result = await response.json();
-            console.log('✅ Backend transcription successful:', result);
+            console.log('✅ Backend transcription successful!');
+            console.log('📝 Result:', JSON.stringify(result, null, 2));
+            console.log('📝 Transcript:', result.transcript);
+            console.log('📝 Summary:', result.summary);
             return result;
         } else {
-            throw new Error(`Backend error: ${response.status}`);
+            const errorText = await response.text();
+            console.error('❌ Backend error response:', errorText);
+            throw new Error(`Backend error: ${response.status} - ${errorText}`);
         }
         
     } catch (error) {
-        console.error('Backend transcription failed, using fallback:', error);
+        console.error('❌ Backend transcription failed:', error);
+        console.error('❌ Error details:', error.message);
         
         // Return fallback result
         const duration = Math.floor((Date.now() - recordingStartTime) / 1000);
         return {
-            transcript: "Backend transcription failed. This is a fallback mock transcript.",
-            summary: `Mock transcription for ${duration}s recording (backend unavailable)`,
+            transcript: `Backend transcription failed: ${error.message}. This is a fallback mock transcript.`,
+            summary: `Mock transcription for ${duration}s recording (backend error: ${error.message})`,
             duration: duration,
             confidence: 0.5,
             language: 'en'
@@ -741,6 +968,19 @@ async function processUploadedFile(file) {
     setTimeout(() => {
         showToast('File processing complete!', 'success');
     }, 2000);
+}
+
+// Toggle transcript panel
+function toggleTranscriptPanel() {
+    const transcriptContent = document.querySelector('.transcript-content-grain');
+    const toggleBtn = document.getElementById('toggleTranscript');
+    
+    if (transcriptContent && toggleBtn) {
+        transcriptContent.classList.toggle('collapsed');
+        const isCollapsed = transcriptContent.classList.contains('collapsed');
+        toggleBtn.querySelector('span').textContent = isCollapsed ? '+' : '−';
+        toggleBtn.setAttribute('title', isCollapsed ? 'Expand' : 'Collapse');
+    }
 }
 
 // Toggle transcript
@@ -810,46 +1050,21 @@ function addTranscriptEntry(text) {
     elements.transcriptContent.scrollTop = elements.transcriptContent.scrollHeight;
 }
 
-// Process completed recording
-async function processRecording() {
-    try {
-        console.log('Processing recording...', recordedChunks.length, 'chunks');
-        
-        if (recordedChunks.length === 0) {
-            showToast('No recording data to process', 'warning');
-            return;
-        }
-        
-        // Combine chunks
-        const recordedBlob = new Blob(recordedChunks, { type: 'video/webm' });
-        
-        // Create meeting record
-        const meetingData = {
-            id: Date.now(),
-            title: `Meeting ${new Date().toLocaleDateString()}`,
-            platform: 'Desktop Recording',
-            duration: Math.floor((Date.now() - recordingStartTime) / 1000),
-            timestamp: new Date().toISOString(),
-            summary: 'AI-generated summary will appear here after processing...',
-            transcript: 'Full transcript available after processing...'
-        };
-        
-        // Save locally for demo
-        saveMeetingLocally(meetingData);
-        
-        showToast('Recording processed successfully!', 'success');
-        
-    } catch (error) {
-        console.error('Processing error:', error);
-        showToast('Failed to process recording', 'error');
-    }
-}
-
 // Save meeting locally
 function saveMeetingLocally(meetingData) {
     const meetings = JSON.parse(localStorage.getItem('meetings') || '[]');
-    meetings.unshift(meetingData);
+    
+    // Check if meeting already exists (prevent duplicates)
+    const existingIndex = meetings.findIndex(m => m.id === meetingData.id);
+    if (existingIndex !== -1) {
+        console.log('⚠️ Meeting already exists, updating instead of duplicating');
+        meetings[existingIndex] = meetingData;
+    } else {
+        meetings.unshift(meetingData);
+    }
+    
     localStorage.setItem('meetings', JSON.stringify(meetings));
+    console.log('💾 Meeting saved locally:', meetingData.id);
 }
 
 // Update date display
@@ -908,9 +1123,9 @@ function loadUpcomingMeetings() {
     `).join('');
 }
 
-// Load recorded meetings from backend
+// Load recorded meetings from LOCAL STORAGE (no database required)
 async function loadRecordedMeetings() {
-    console.log('Loading recorded meetings from backend...');
+    console.log('Loading recorded meetings from local storage...');
     
     if (!elements.meetingsGrid) {
         console.error('Meetings grid element not found!');
@@ -921,41 +1136,22 @@ async function loadRecordedMeetings() {
         // Show loading state
         elements.meetingsGrid.innerHTML = '<div class="loading">Loading meetings...</div>';
         
-        // Fetch meetings from backend
-        const response = await fetch(`${backendUrl}/api/meetings`);
+        // Load meetings from local storage
+        const meetings = JSON.parse(localStorage.getItem('meetings') || '[]');
         
-        if (!response.ok) {
-            throw new Error(`Backend error: ${response.status}`);
-        }
-        
-        const data = await response.json();
-        const meetings = data.meetings || [];
-        
-        console.log(`✅ Loaded ${meetings.length} meetings from backend`);
+        console.log(`✅ Loaded ${meetings.length} meetings from local storage`);
         
         if (meetings.length === 0) {
             elements.meetingsGrid.innerHTML = '<div class="no-meetings">No meetings recorded yet. Start your first recording!</div>';
             return;
         }
         
-        // Convert backend format to frontend format
-        const formattedMeetings = meetings.map(meeting => ({
-            id: meeting.id,
-            title: meeting.title,
-            timestamp: new Date(meeting.created_at).getTime(),
-            duration: meeting.duration || 0,
-            summary: meeting.summary || 'No summary available',
-            transcript: meeting.transcript || 'No transcript available',
-            organizer: 'You',
-            participants: 1,
-            confidence: meeting.confidence || 0
-        }));
-        
-        displayMeetings(formattedMeetings);
+        // Meetings are already in the correct format
+        displayMeetings(meetings);
         
     } catch (error) {
-        console.error('Failed to load meetings from backend:', error);
-        elements.meetingsGrid.innerHTML = '<div class="error">Failed to load meetings. Please check your connection.</div>';
+        console.error('Failed to load meetings:', error);
+        elements.meetingsGrid.innerHTML = '<div class="error">Failed to load meetings from local storage.</div>';
     }
 }
 
@@ -1009,35 +1205,25 @@ async function showMeetingDetail(meetingId) {
         // Switch to meeting detail view first
         switchView('meetingDetail');
         
-        // Fetch meeting details from backend
-        const response = await fetch(`${backendUrl}/api/meetings`);
-        if (!response.ok) {
-            throw new Error(`Backend error: ${response.status}`);
-        }
+        // Load meeting from LOCAL STORAGE
+        const meetings = JSON.parse(localStorage.getItem('meetings') || '[]');
+        const meeting = meetings.find(m => m.id === meetingId);
         
-        const data = await response.json();
-        const backendMeeting = data.meetings.find(m => m.id === meetingId);
-        
-        if (!backendMeeting) {
+        if (!meeting) {
             console.error('❌ Meeting not found:', meetingId);
             showToast('Meeting not found', 'error');
+            updateMeetingDetailView({
+                title: 'Meeting Not Found',
+                summary: 'This meeting could not be found in local storage.',
+                transcript: 'Unable to load transcript.',
+                organizer: 'Unknown',
+                timestamp: Date.now(),
+                duration: 0
+            });
             return;
         }
         
-        console.log('✅ Found meeting:', backendMeeting.title);
-        
-        // Convert to frontend format
-        const meeting = {
-            id: backendMeeting.id,
-            title: backendMeeting.title,
-            timestamp: new Date(backendMeeting.created_at).getTime(),
-            duration: backendMeeting.duration || 0,
-            summary: backendMeeting.summary || 'No summary available',
-            transcript: backendMeeting.transcript || 'No transcript available',
-            organizer: 'You',
-            participants: 1,
-            confidence: backendMeeting.confidence || 0
-        };
+        console.log('✅ Found meeting:', meeting.title);
         
         // Update meeting detail view with actual data
         updateMeetingDetailView(meeting);
@@ -1057,55 +1243,193 @@ async function showMeetingDetail(meetingId) {
 }
 
 // Update meeting detail view with actual meeting data
-function updateMeetingDetailView(meeting) {
+async function updateMeetingDetailView(meeting) {
     console.log('🔄 Updating meeting detail view with:', meeting);
     
     // Update title
     const titleElement = document.querySelector('#meetingDetailView .meeting-title');
     if (titleElement) {
         titleElement.textContent = meeting.title;
-        console.log('✅ Updated title:', meeting.title);
     }
     
-    // Update metadata
-    const metaElement = document.querySelector('#meetingDetailView .meeting-meta .meeting-meta');
-    if (metaElement) {
-        const date = new Date(meeting.timestamp).toLocaleDateString();
-        const duration = `${Math.floor(meeting.duration / 60)}m ${meeting.duration % 60}s`;
-        metaElement.innerHTML = `
-            <span>${date}</span>
-            <span>•</span>
-            <span>${duration}</span>
-            <span>•</span>
-            <span>${meeting.participants || 1} participants</span>
-        `;
-        console.log('✅ Updated metadata');
+    // Update metadata in header
+    const dateElement = document.querySelector('.meeting-date');
+    if (dateElement) {
+        dateElement.textContent = new Date(meeting.timestamp).toLocaleDateString('en-US', {
+            month: 'short',
+            day: 'numeric',
+            year: 'numeric'
+        });
     }
     
-    // Update summary
-    const summaryElement = document.querySelector('#meetingDetailView .summary-text');
-    if (summaryElement) {
-        summaryElement.textContent = meeting.summary || 'No summary available';
-        console.log('✅ Updated summary');
+    const durationDisplayElement = document.querySelector('.meeting-duration-display');
+    if (durationDisplayElement) {
+        const minutes = Math.floor(meeting.duration / 60);
+        const seconds = meeting.duration % 60;
+        durationDisplayElement.textContent = `${minutes}m ${seconds}s`;
     }
     
-    // Update transcript
-    const transcriptElement = document.querySelector('#meetingDetailView .transcript-content');
+    const organizerDisplayElement = document.querySelector('.meeting-organizer-display');
+    if (organizerDisplayElement) {
+        organizerDisplayElement.textContent = meeting.organizer || 'Unknown';
+    }
+    
+    // Update transcript in sidebar
+    const transcriptElement = document.getElementById('transcriptContent');
     if (transcriptElement) {
-        transcriptElement.innerHTML = `
-            <div class="transcript-text" style="white-space: pre-wrap; line-height: 1.6;">
-                ${meeting.transcript || 'No transcript available'}
-            </div>
-        `;
-        console.log('✅ Updated transcript');
+        transcriptElement.textContent = meeting.transcript || 'No transcript available';
     }
     
-    // Update organizer info
-    const organizerNameElement = document.querySelector('#meetingDetailView .organizer-name');
-    if (organizerNameElement) {
-        organizerNameElement.textContent = meeting.organizer || 'Unknown';
-        console.log('✅ Updated organizer');
+    // Generate AI summary with OpenRouter
+    await generateAISummary(meeting.transcript);
+}
+
+// Generate AI summary using OpenRouter
+async function generateAISummary(transcript) {
+    const summaryElement = document.getElementById('summaryText');
+    const keyPointsList = document.getElementById('keyPointsList');
+    const actionItemsList = document.getElementById('actionItemsList');
+    
+    if (!transcript || transcript.length < 20) {
+        if (summaryElement) summaryElement.textContent = 'No transcript available for summarization';
+        if (keyPointsList) keyPointsList.innerHTML = '<div class="no-data">No transcript to analyze</div>';
+        if (actionItemsList) actionItemsList.innerHTML = '<div class="no-data">No action items found</div>';
+        return;
     }
+    
+    try {
+        console.log('🤖 Generating AI summary with OpenRouter...');
+        
+        // Show loading state
+        if (summaryElement) summaryElement.textContent = 'AI is analyzing the meeting transcript...';
+        if (keyPointsList) keyPointsList.innerHTML = '<div class="loading">Analyzing meeting...</div>';
+        if (actionItemsList) actionItemsList.innerHTML = '<div class="loading">Extracting action items...</div>';
+        
+        // Try the dedicated /summarize endpoint first
+        let response = await fetch(`${backendUrl}/api/transcription/summarize`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({ transcript })
+        });
+        
+        // If endpoint doesn't exist (404), try extracting from the transcript itself
+        if (!response.ok && response.status === 404) {
+            console.warn('⚠️ /summarize endpoint not available on deployed backend');
+            console.log('📝 Using client-side summary extraction...');
+            
+            // Generate a simple summary client-side
+            const result = generateClientSideSummary(transcript);
+            displaySummaryResult(result, summaryElement, keyPointsList, actionItemsList);
+            showToast('📝 Summary generated (AI endpoint unavailable)', 'info');
+            return;
+        }
+        
+        if (!response.ok) {
+            throw new Error(`Backend error: ${response.status}`);
+        }
+        
+        const result = await response.json();
+        console.log('✅ AI Summary generated:', result);
+        
+        displaySummaryResult(result, summaryElement, keyPointsList, actionItemsList);
+        showToast('✨ AI summary generated!', 'success');
+        
+    } catch (error) {
+        console.error('❌ AI summary generation failed:', error);
+        
+        // Try client-side fallback
+        try {
+            const fallbackResult = generateClientSideSummary(transcript);
+            displaySummaryResult(fallbackResult, summaryElement, keyPointsList, actionItemsList);
+            showToast('📝 Summary generated (fallback mode)', 'info');
+        } catch (fallbackError) {
+            // Final fallback
+            if (summaryElement) {
+                summaryElement.textContent = 'AI summarization is temporarily unavailable. The full transcript is available in the sidebar.';
+            }
+            if (keyPointsList) {
+                keyPointsList.innerHTML = '<div class="no-data">AI analysis unavailable - please deploy the latest backend</div>';
+            }
+            if (actionItemsList) {
+                actionItemsList.innerHTML = '<div class="no-data">AI analysis unavailable - please deploy the latest backend</div>';
+            }
+            showToast('⚠️ AI summary unavailable', 'warning');
+        }
+    }
+}
+
+// Display summary results in UI
+function displaySummaryResult(result, summaryElement, keyPointsList, actionItemsList) {
+    // Update summary
+    if (summaryElement) {
+        summaryElement.textContent = result.summary || 'Meeting discussion summary not available';
+    }
+    
+    // Update key points
+    if (keyPointsList && result.key_points && result.key_points.length > 0) {
+        keyPointsList.innerHTML = result.key_points.map(point => `
+            <div class="key-point-item">${point}</div>
+        `).join('');
+    } else if (keyPointsList) {
+        keyPointsList.innerHTML = '<div class="no-data">No key points identified</div>';
+    }
+    
+    // Update action items
+    if (actionItemsList && result.action_items && result.action_items.length > 0) {
+        actionItemsList.innerHTML = result.action_items.map(item => `
+            <div class="action-item">${item}</div>
+        `).join('');
+    } else if (actionItemsList) {
+        actionItemsList.innerHTML = '<div class="no-data">No action items identified</div>';
+    }
+}
+
+// Generate client-side summary when backend AI is unavailable
+function generateClientSideSummary(transcript) {
+    console.log('🔧 Generating client-side summary as fallback...');
+    
+    // Extract sentences
+    const sentences = transcript.match(/[^\.!\?]+[\.!\?]+/g) || [transcript];
+    
+    // Create a simple summary (first 2-3 sentences)
+    const summaryLength = Math.min(3, sentences.length);
+    const summary = sentences.slice(0, summaryLength).join(' ').trim();
+    
+    // Extract potential key points (look for keywords)
+    const keyPoints = [];
+    const keywords = ['discussed', 'decided', 'agreed', 'proposed', 'mentioned', 'reviewed', 'planned'];
+    
+    sentences.forEach(sentence => {
+        const lowerSentence = sentence.toLowerCase();
+        if (keywords.some(keyword => lowerSentence.includes(keyword))) {
+            const cleanSentence = sentence.trim().replace(/^(and|but|so|then)\s+/i, '');
+            if (cleanSentence.length > 20 && keyPoints.length < 5) {
+                keyPoints.push(cleanSentence);
+            }
+        }
+    });
+    
+    // Extract action items (look for action words)
+    const actionItems = [];
+    const actionWords = ['will', 'need to', 'should', 'must', 'going to', 'plan to', 'have to'];
+    
+    sentences.forEach(sentence => {
+        const lowerSentence = sentence.toLowerCase();
+        if (actionWords.some(word => lowerSentence.includes(word))) {
+            const cleanSentence = sentence.trim().replace(/^(and|but|so|then)\s+/i, '');
+            if (cleanSentence.length > 20 && actionItems.length < 5) {
+                actionItems.push(cleanSentence);
+            }
+        }
+    });
+    
+    return {
+        summary: summary || 'Meeting transcript available in sidebar.',
+        key_points: keyPoints.length > 0 ? keyPoints : ['Please review the full transcript for details'],
+        action_items: actionItems.length > 0 ? actionItems : []
+    };
 }
 
 // Check permissions

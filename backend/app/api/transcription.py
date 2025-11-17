@@ -27,14 +27,23 @@ else:
         WHISPER_AVAILABLE = False
         lightweight_whisper = None
 
+from app.services.ai_service import AIService
+
 router = APIRouter()
 logger = logging.getLogger(__name__)
+
+# Initialize AI service
+ai_service = AIService()
 
 
 class AudioRequest(BaseModel):
     audio_data: str
     format: Optional[str] = "webm"
     title: Optional[str] = "Meeting Recording"
+
+
+class SummarizeRequest(BaseModel):
+    transcript: str
 
 
 @router.post("/audio")
@@ -146,3 +155,21 @@ def _generate_mock_transcript(estimated_duration: int) -> tuple[str, str, float]
         confidence = 0.90
     
     return transcript, summary, confidence
+
+
+@router.post("/summarize")
+async def summarize_transcript(request: SummarizeRequest):
+    """Generate AI summary of transcript using OpenRouter"""
+    
+    try:
+        logger.info(f"Received summarization request for transcript of length: {len(request.transcript)}")
+        
+        # Generate AI summary using OpenRouter
+        result = await ai_service.summarize_transcript(request.transcript)
+        
+        logger.info(f"Summary generated successfully")
+        return result
+        
+    except Exception as e:
+        logger.error(f"Summarization error: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
