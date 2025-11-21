@@ -120,11 +120,21 @@ async def transcribe_audio(request: AudioRequest, req: Request):
         finally:
             db.close()
         
-        logger.info(f"Audio transcription completed successfully for {meeting_id}")
-        return meeting_obj
+        # Return as dict for JSON serialization
+        result = {
+            "id": meeting_obj.id,
+            "title": meeting_obj.title,
+            "transcript": meeting_obj.transcript,
+            "summary": meeting_obj.summary,
+            "duration": meeting_obj.duration,
+            "language": meeting_obj.language,
+            "confidence": meeting_obj.confidence,
+            "audio_format": meeting_obj.audio_format,
+            "created_at": meeting_obj.created_at.isoformat()
+        }
         
         logger.info(f"Audio transcription completed successfully for {meeting_id}")
-        return meeting
+        return result
         
     except Exception as e:
         logger.error(f"Audio transcription error: {str(e)}")

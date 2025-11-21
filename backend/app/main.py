@@ -101,14 +101,27 @@ async def health_check():
 # Include routers
 app.include_router(transcription.router, prefix="/api/transcription", tags=["Transcription"])
 
-# Meetings endpoint
 @app.get("/api/meetings")
 async def get_meetings():
     """Get all meetings from Database"""
     db = SessionLocal()
     try:
         meetings = db.query(Meeting).order_by(Meeting.created_at.desc()).all()
-        return {"meetings": meetings, "total": len(meetings)}
+        
+        # Convert to dicts for JSON serialization
+        meetings_list = [{
+            "id": m.id,
+            "title": m.title,
+            "transcript": m.transcript,
+            "summary": m.summary,
+            "duration": m.duration,
+            "language": m.language,
+            "confidence": m.confidence,
+            "audio_format": m.audio_format,
+            "created_at": m.created_at.isoformat()
+        } for m in meetings]
+        
+        return {"meetings": meetings_list, "total": len(meetings_list)}
     except Exception as e:
         logger.error(f"Failed to fetch meetings: {e}")
         return {"meetings": [], "total": 0}
