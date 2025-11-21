@@ -27,23 +27,14 @@ else:
         WHISPER_AVAILABLE = False
         lightweight_whisper = None
 
-from app.services.ai_service import AIService
-
 router = APIRouter()
 logger = logging.getLogger(__name__)
-
-# Initialize AI service
-ai_service = AIService()
 
 
 class AudioRequest(BaseModel):
     audio_data: str
     format: Optional[str] = "webm"
     title: Optional[str] = "Meeting Recording"
-
-
-class SummarizeRequest(BaseModel):
-    transcript: str
 
 
 @router.post("/audio")
@@ -99,38 +90,38 @@ async def transcribe_audio(request: AudioRequest, req: Request):
             # Use mock transcription
             transcript, summary, confidence = _generate_mock_transcript(estimated_duration)
         
-        # Create meeting object
-        meeting = {
-            "id": meeting_id,
-            "title": request.title,
-            "transcript": transcript,
-            "summary": summary,
-            "duration": estimated_duration,
-            "language": "en",
-            "confidence": confidence,
-            "audio_format": request.format,
-            "created_at": datetime.now().isoformat(),
-            "segments": whisper_result.get("segments", []) if USE_PRODUCTION_WHISPER and not whisper_result.get("error") else []
-        }
+        # Store in Database
+        from app.db.database import SessionLocal
+        from app.db.models import Meeting
         
-        # Store in Supabase if available
-        if hasattr(req.app.state, 'supabase') and req.app.state.supabase:
-            try:
-                logger.info(f"🔄 Attempting to store meeting {meeting_id} in Supabase...")
-                response = req.app.state.supabase.table('meetings').insert(meeting).execute()
-                logger.info(f"📊 Supabase response: {response}")
-                
-                if response.data:
-                    logger.info(f"✅ Meeting {meeting_id} stored in Supabase successfully")
-                else:
-                    logger.error(f"❌ Failed to store meeting {meeting_id} - no data returned")
-                    logger.error(f"❌ Response details: {response}")
-            except Exception as db_error:
-                logger.error(f"💥 Database error storing meeting {meeting_id}: {db_error}")
-                logger.error(f"💥 Meeting data: {meeting}")
-                # Don't raise the error, just log it so the API still returns success
-        else:
-            logger.warning(f"⚠️ No Supabase client available for meeting {meeting_id}")
+        # Create meeting object
+        meeting_obj = Meeting(
+            id=meeting_id,
+            title=request.title,
+            transcript=transcript,
+            summary=summary,
+            duration=estimated_duration,
+            language="en",
+            confidence=confidence,
+            audio_format=request.format,
+            created_at=datetime.now()
+        )
+        
+        db = SessionLocal()
+        try:
+            logger.info(f"🔄 Attempting to store meeting {meeting_id} in Database...")
+            db.add(meeting_obj)
+            db.commit()
+            db.refresh(meeting_obj)
+            logger.info(f"✅ Meeting {meeting_id} stored in Database successfully")
+        except Exception as db_error:
+            logger.error(f"💥 Database error storing meeting {meeting_id}: {db_error}")
+            db.rollback()
+        finally:
+            db.close()
+        
+        logger.info(f"Audio transcription completed successfully for {meeting_id}")
+        return meeting_obj
         
         logger.info(f"Audio transcription completed successfully for {meeting_id}")
         return meeting
@@ -156,21 +147,3 @@ def _generate_mock_transcript(estimated_duration: int) -> tuple[str, str, float]
         confidence = 0.90
     
     return transcript, summary, confidence
-
-
-@router.post("/summarize")
-async def summarize_transcript(request: SummarizeRequest):
-    """Generate AI summary of transcript using OpenRouter"""
-    
-    try:
-        logger.info(f"Received summarization request for transcript of length: {len(request.transcript)}")
-        
-        # Generate AI summary using OpenRouter
-        result = await ai_service.summarize_transcript(request.transcript)
-        
-        logger.info(f"Summary generated successfully")
-        return result
-        
-    except Exception as e:
-        logger.error(f"Summarization error: {str(e)}")
-        raise HTTPException(status_code=500, detail=str(e))

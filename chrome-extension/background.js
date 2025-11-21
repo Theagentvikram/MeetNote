@@ -5,7 +5,8 @@
 
 // Constants
 // Auto-detect environment based on available endpoints
-let API_BASE_URL = 'https://orca-app-n4f3w.ondigitalocean.app';  // DigitalOcean production
+let API_BASE_URL = 'https://meetnote-production.ondigitalocean.app';  // DigitalOcean production
+// This will be updated by the deployment script with your actual app name
 
 // For local development, check if local server is available
 async function detectEnvironment() {
@@ -19,7 +20,7 @@ async function detectEnvironment() {
       console.log('Using local development server');
     }
   } catch (error) {
-    console.log('Using production server:', API_BASE_URL);
+    console.log('Using production server');
   }
 }
 

@@ -25,32 +25,18 @@ logger = logging.getLogger(__name__)
 USE_PRODUCTION_WHISPER = settings.ENVIRONMENT.lower() == "production"
 
 
+from app.db.database import SessionLocal, engine, Base
+from app.db.models import Meeting
+
+# Create tables
+Base.metadata.create_all(bind=engine)
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Startup and shutdown events"""
     # Startup
     logger.info("Starting MeetNote Backend...")
     logger.info(f"Environment: {settings.ENVIRONMENT}")
-    
-    # Initialize Supabase client
-    try:
-        supabase_url = settings.SUPABASE_URL
-        supabase_key = settings.SUPABASE_KEY
-        
-        if supabase_url and supabase_key:
-            # Simple initialization without proxy parameter
-            from supabase import create_client, Client
-            app.state.supabase: Client = create_client(
-                supabase_url=supabase_url,
-                supabase_key=supabase_key
-            )
-            logger.info("✅ Supabase client initialized")
-        else:
-            logger.warning("⚠️ Supabase credentials missing, running without database")
-            app.state.supabase = None
-    except Exception as e:
-        logger.warning(f"⚠️ Supabase initialization failed: {e}")
-        app.state.supabase = None
     
     if USE_PRODUCTION_WHISPER:
         logger.info("✅ Backend ready with production Whisper pipeline")
@@ -102,13 +88,12 @@ async def root():
 @app.get("/api/health")
 async def health_check():
     """Health check endpoint for frontend"""
-    database_status = "connected" if hasattr(app.state, 'supabase') and app.state.supabase else "disconnected"
     whisper_status = "production" if USE_PRODUCTION_WHISPER else "mock"
     return {
         "status": "healthy",
         "timestamp": "2025-11-16T18:48:39.281446",
         "version": "2.0.0",
-        "database": f"supabase ({database_status})",
+        "database": "postgres",
         "whisper": whisper_status
     }
 
@@ -119,19 +104,16 @@ app.include_router(transcription.router, prefix="/api/transcription", tags=["Tra
 # Meetings endpoint
 @app.get("/api/meetings")
 async def get_meetings():
-    """Get all meetings from Supabase"""
+    """Get all meetings from Database"""
+    db = SessionLocal()
     try:
-        if not hasattr(app.state, 'supabase') or not app.state.supabase:
-            # Return empty list if no database connection
-            return {"meetings": [], "total": 0}
-        
-        response = app.state.supabase.table('meetings').select('*').order('created_at', desc=True).execute()
-        meetings = response.data if response.data else []
-        
+        meetings = db.query(Meeting).order_by(Meeting.created_at.desc()).all()
         return {"meetings": meetings, "total": len(meetings)}
     except Exception as e:
         logger.error(f"Failed to fetch meetings: {e}")
         return {"meetings": [], "total": 0}
+    finally:
+        db.close()
 
 
 # WebSocket endpoint for real-time transcription (disabled for lightweight deployment)

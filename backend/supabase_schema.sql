@@ -12,15 +12,7 @@ CREATE TABLE IF NOT EXISTS meetings (
     confidence DECIMAL(3,2) DEFAULT 0.0,
     audio_format VARCHAR(20) DEFAULT 'webm',
     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-    updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-    
-    -- New fields for enhanced features
-    segments JSONB DEFAULT '[]'::jsonb,
-    ai_summary TEXT,
-    key_points JSONB DEFAULT '[]'::jsonb,
-    action_items JSONB DEFAULT '[]'::jsonb,
-    organizer VARCHAR(255),
-    participants INTEGER DEFAULT 1
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
 
 -- Create users table (optional, for future auth)

@@ -8,7 +8,7 @@ python-dotenv==1.0.0
 
 # Database - Supabase
 supabase==2.3.4
-psycopg2-binary==2.9.7
+psycopg2-binary==2.9.11
 sqlalchemy==2.0.23
 alembic==1.13.1
 
@@ -21,8 +21,8 @@ openai==1.6.1
 httpx==0.25.2
 
 # Whisper AI - Full Production Support
-faster-whisper==0.10.0
-numpy==1.24.3
+faster-whisper
+numpy
 soundfile==0.12.1
 librosa==0.10.1
 
