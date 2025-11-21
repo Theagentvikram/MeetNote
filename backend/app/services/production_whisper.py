@@ -195,13 +195,19 @@ class ProductionWhisperService:
     
     def _process_audio_data(self, audio_data: bytes) -> np.ndarray:
         """Convert audio bytes to numpy array at correct sample rate"""
+        import tempfile
+        import os
+        
+        temp_path = None
         try:
-            # Try to load audio from bytes
-            audio_io = io.BytesIO(audio_data)
+            # Create temp file with .webm extension so librosa/ffmpeg knows the format
+            with tempfile.NamedTemporaryFile(suffix='.webm', delete=False) as temp_file:
+                temp_path = temp_file.name
+                temp_file.write(audio_data)
             
-            # Use librosa to load and resample
+            # Use librosa to load from FILE PATH (allows ffmpeg usage)
             audio_array, original_sr = librosa.load(
-                audio_io, 
+                temp_path, 
                 sr=settings.SAMPLE_RATE,
                 mono=True,
                 dtype=np.float32
@@ -217,6 +223,13 @@ class ProductionWhisperService:
             logger.error(f"Audio processing error: {e}")
             # Return silence if processing fails
             return np.zeros(settings.SAMPLE_RATE * 1, dtype=np.float32)  # 1 second of silence
+        finally:
+            # Clean up temp file
+            if temp_path and os.path.exists(temp_path):
+                try:
+                    os.unlink(temp_path)
+                except Exception:
+                    pass
     
     def _mock_transcription(self, audio_size: int) -> Dict[str, Any]:
         """Mock transcription for testing/fallback"""
