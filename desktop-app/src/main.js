@@ -142,13 +142,17 @@ async function checkPermissions() {
         microphone: micAccess
       });
 
-      // Request permissions if needed
+      // Request permissions if needed (don't await, just trigger the prompt)
       if (screenAccess !== 'granted') {
-        await systemPreferences.askForMediaAccess('screen');
+        systemPreferences.askForMediaAccess('screen').catch(err => {
+          console.log('Screen permission request:', err.message);
+        });
       }
 
       if (micAccess !== 'granted') {
-        await systemPreferences.askForMediaAccess('microphone');
+        systemPreferences.askForMediaAccess('microphone').catch(err => {
+          console.log('Microphone permission request:', err.message);
+        });
       }
     }
   } catch (error) {

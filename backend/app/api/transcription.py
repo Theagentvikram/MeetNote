@@ -102,7 +102,7 @@ async def transcribe_audio(request: AudioRequest, req: Request):
             summary=summary,
             duration=estimated_duration,
             language="en",
-            confidence=confidence,
+            confidence=float(confidence),  # Convert numpy float to Python float
             audio_format=request.format,
             created_at=datetime.now()
         )
