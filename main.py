@@ -101,12 +101,12 @@ async def transcribe(
         "title": title,
         "transcript": transcript,
         "summary": summary,
-        "keyPoints": key_points,
-        "actionItems": action_items,
+        "key_points": key_points,
+        "action_items": action_items,
         "duration": duration,
         "confidence": 0.92,
         "language": detected_lang,
-        "createdAt": datetime.utcnow().isoformat() + "Z",
+        "created_at": datetime.utcnow().isoformat() + "Z",
     }
 
 
