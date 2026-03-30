@@ -1,0 +1,11 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(git add main.py requirements.txt render.yaml)",
+      "Bash(git commit:*)",
+      "Bash(git push origin main)",
+      "Bash(defaults delete com.techabhee.MeetNote backendURL)",
+      "Bash(curl -s https://meetnote-backend.onrender.com/api/health)"
+    ]
+  }
+}
