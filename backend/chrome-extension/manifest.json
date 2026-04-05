@@ -1,0 +1,78 @@
+{
+  "manifest_version": 3,
+  "name": "MeetNote - AI Meeting Assistant",
+  "version": "1.0.0",
+  "description": "Record, transcribe, and get AI summaries of your meetings. Works invisibly with Zoom, Google Meet, and Microsoft Teams.",
+  "permissions": [
+    "storage",
+    "tabs",
+    "activeTab",
+    "scripting",
+    "tabCapture",
+    "notifications"
+  ],
+  "host_permissions": [
+    "https://meet.google.com/*",
+    "https://*.zoom.us/*",
+    "https://teams.microsoft.com/*",
+    "https://meetnote-backend.onrender.com/*",
+    "http://localhost:8000/*"
+  ],
+  "background": {
+    "service_worker": "background.js",
+    "type": "module"
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "https://meet.google.com/*",
+        "https://*.zoom.us/*",
+        "https://teams.microsoft.com/*",
+        "file://*/*test-meeting*",
+        "http://localhost:*/*",
+        "https://localhost:*/*"
+      ],
+      "js": ["content.js"],
+      "run_at": "document_end"
+    }
+  ],
+  "action": {
+    "default_popup": "popup.html",
+    "default_icon": {
+      "16": "icons/icon16.png",
+      "48": "icons/icon48.png",
+      "128": "icons/icon128.png"
+    }
+  },
+  "icons": {
+    "16": "icons/icon16.png",
+    "48": "icons/icon48.png",
+    "128": "icons/icon128.png"
+  },
+  "commands": {
+    "start-recording": {
+      "suggested_key": {
+        "default": "Alt+R"
+      },
+      "description": "Start/Stop recording"
+    },
+    "create-highlight": {
+      "suggested_key": {
+        "default": "Alt+H"
+      },
+      "description": "Create highlight"
+    },
+    "toggle-transcript": {
+      "suggested_key": {
+        "default": "Alt+T"
+      },
+      "description": "Toggle transcript overlay"
+    }
+  },
+  "web_accessible_resources": [
+    {
+      "resources": ["overlay.html", "overlay.css"],
+      "matches": ["https://meet.google.com/*", "https://*.zoom.us/*", "https://teams.microsoft.com/*", "file://*/*", "http://localhost:*/*", "https://localhost:*/*"]
+    }
+  ]
+}

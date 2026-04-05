@@ -1,0 +1,65 @@
+version: '3.8'
+
+services:
+  # MeetNote Backend API
+  meetnote-backend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - "8000:8000"
+    environment:
+      # Basic settings
+      - ENVIRONMENT=production
+      - DEBUG=false
+      - PORT=8000
+      
+      # Supabase Configuration (replace with your actual values)
+      - SUPABASE_URL=${SUPABASE_URL}
+      - SUPABASE_KEY=${SUPABASE_KEY}
+      - SUPABASE_SERVICE_KEY=${SUPABASE_SERVICE_KEY}
+      - DATABASE_URL=${DATABASE_URL}
+      
+      # Security
+      - SECRET_KEY=${SECRET_KEY}
+      
+      # AI Services
+      - OPENROUTER_API_KEY=${OPENROUTER_API_KEY}
+      
+      # Whisper Settings
+      - WHISPER_MODEL=base
+      - WHISPER_DEVICE=cpu
+      - WHISPER_COMPUTE_TYPE=int8
+      
+      # File paths (inside container)
+      - AUDIO_UPLOAD_PATH=/app/uploads
+      - TEMP_PATH=/app/temp
+      
+      # CORS
+      - CORS_ORIGINS=http://localhost:3000,http://localhost:3001,https://your-frontend.netlify.app,chrome-extension://*
+      
+      # Logging
+      - LOG_LEVEL=info
+    
+    volumes:
+      # Mount volumes for persistent storage
+      - uploads_data:/app/uploads
+      - recordings_data:/app/recordings
+      - temp_data:/app/temp
+    
+    restart: unless-stopped
+    
+    healthcheck:
+      test: ["CMD", "python", "-c", "import requests; requests.get('http://localhost:8000/', timeout=5)"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+
+volumes:
+  uploads_data:
+    driver: local
+  recordings_data:
+    driver: local  
+  temp_data:
+    driver: local

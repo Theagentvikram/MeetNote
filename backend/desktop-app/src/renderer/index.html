@@ -1,0 +1,299 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>MeetNote</title>
+    <link rel="stylesheet" href="styles.css">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+</head>
+<body>
+    <!-- App Header -->
+    <header class="app-header">
+        <div class="header-left">
+            <div class="app-logo">
+                <div class="logo-icon">M</div>
+                <span class="app-name">MeetNote</span>
+            </div>
+        </div>
+        
+        <div class="header-center">
+            <nav class="main-nav">
+                <button class="nav-btn active" data-view="calendar">Calendar</button>
+                <button class="nav-btn" data-view="meetings">Meetings</button>
+                <button class="nav-btn" data-view="settings">Settings</button>
+            </nav>
+        </div>
+        
+        <div class="header-right">
+            <div class="recording-status" id="recordingStatus">
+                <span class="status-dot" id="statusDot"></span>
+                <span class="status-text" id="statusText">Ready</span>
+            </div>
+            <button class="record-btn" id="recordBtn">
+                <span class="record-icon"></span>
+                Record
+            </button>
+        </div>
+    </header>
+
+    <!-- Main Content -->
+    <main class="main-content">
+        <!-- Calendar View -->
+        <div class="view active" id="calendarView">
+            <div class="view-content">
+                <!-- Quick Record Section -->
+                <div class="quick-record-section">
+                    <div class="quick-record-input">
+                        <input type="text" placeholder="Enter meeting link or ID" class="meeting-input" id="meetingInput">
+                        <button class="record-now-btn" id="recordNowBtn">Record</button>
+                    </div>
+                </div>
+
+                <!-- Upcoming Meetings -->
+                <div class="meetings-section">
+                    <div class="section-header">
+                        <h2>Today</h2>
+                        <span class="date-display" id="dateDisplay"></span>
+                    </div>
+                    
+                    <div class="meetings-list" id="upcomingMeetings">
+                        <!-- Meetings will be populated here -->
+                    </div>
+                </div>
+
+                <!-- This Week -->
+                <div class="meetings-section">
+                    <div class="section-header">
+                        <h2>This Week</h2>
+                    </div>
+                    
+                    <div class="week-meetings" id="weekMeetings">
+                        <!-- Week meetings will be populated here -->
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Meetings View -->
+        <div class="view" id="meetingsView">
+            <div class="view-content">
+                <div class="meetings-header">
+                    <h1>My Meetings</h1>
+                    <div class="meetings-actions">
+                        <button class="btn-secondary">
+                            <span class="icon">↻</span>
+                            Refresh
+                        </button>
+                    </div>
+                </div>
+
+                <div class="meetings-grid" id="meetingsGrid">
+                    <!-- Recorded meetings will be populated here -->
+                </div>
+            </div>
+        </div>
+
+        <!-- Meeting Detail View -->
+        <div class="view" id="meetingDetailView">
+            <div class="view-content">
+                <div class="meeting-detail-header">
+                    <button class="back-btn" id="backToMeetings">← Back</button>
+                    <div class="meeting-meta">
+                        <h1 class="meeting-title">Loading...</h1>
+                        <div class="meeting-meta">
+                            <span>Loading meeting details...</span>
+                        </div>
+                    </div>
+                    <div class="meeting-actions">
+                        <button class="btn-secondary">Share</button>
+                        <button class="btn-secondary">Export</button>
+                    </div>
+                </div>
+
+                <div class="meeting-content">
+                    <div class="meeting-summary">
+                        <h3>Summary</h3>
+                        <p class="summary-text">Loading summary...</p>
+                    </div>
+                    
+                    <div class="meeting-transcript">
+                        <h3>Transcript</h3>
+                        <div class="transcript-content">
+                            <p>Loading transcript...</p>
+                        </div>
+                    </div>
+                    
+                    <div class="meeting-participants">
+                        <h3>Participants</h3>
+                        <div class="organizer-info">
+                            <div class="organizer-name">Loading...</div>
+                            <div class="organizer-role">Meeting Organizer</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Settings View -->
+        <div class="view" id="settingsView">
+            <div class="view-content">
+                <div class="settings-header">
+                    <h1>Recording settings</h1>
+                </div>
+
+                <div class="settings-content">
+                    <div class="settings-group">
+                        <h3>Appearance</h3>
+                        <div class="setting-item">
+                            <div class="setting-info">
+                                <label>Theme</label>
+                                <p>Choose your preferred theme</p>
+                            </div>
+                            <div class="theme-toggle">
+                                <button class="theme-btn active" data-theme="light">
+                                    <span class="theme-icon">☀️</span>
+                                    Light
+                                </button>
+                                <button class="theme-btn" data-theme="dark">
+                                    <span class="theme-icon">🌙</span>
+                                    Dark
+                                </button>
+                                <button class="theme-btn" data-theme="auto">
+                                    <span class="theme-icon">⚙️</span>
+                                    Auto
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="settings-group">
+                        <h3>General</h3>
+                        <div class="setting-item">
+                            <div class="setting-info">
+                                <label>Recording quality</label>
+                                <p>Choose the video quality for your recordings</p>
+                            </div>
+                            <select class="setting-select" id="qualitySelect">
+                                <option value="high">High (1080p)</option>
+                                <option value="medium">Medium (720p)</option>
+                                <option value="low">Low (480p)</option>
+                            </select>
+                        </div>
+
+                        <div class="setting-item">
+                            <div class="setting-info">
+                                <label>Auto-start recording</label>
+                                <p>Automatically start recording when joining meetings</p>
+                            </div>
+                            <label class="toggle-switch">
+                                <input type="checkbox" id="autoStartToggle">
+                                <span class="toggle-slider"></span>
+                            </label>
+                        </div>
+                    </div>
+
+                    <div class="settings-group">
+                        <h3>Transcription</h3>
+                        <div class="setting-item">
+                            <div class="setting-info">
+                                <label>Language</label>
+                                <p>Primary language for transcription</p>
+                            </div>
+                            <select class="setting-select" id="languageSelect">
+                                <option value="en">English</option>
+                                <option value="es">Spanish</option>
+                                <option value="fr">French</option>
+                                <option value="de">German</option>
+                            </select>
+                        </div>
+                    </div>
+
+                    <div class="settings-actions">
+                        <button class="btn-primary" id="saveSettingsBtn">Save changes</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </main>
+
+    <!-- Recording Options Modal -->
+    <div class="modal-overlay" id="recordingModal">
+        <div class="modal recording-options-modal">
+            <div class="modal-header">
+                <h2>How would you like to record?</h2>
+                <button class="modal-close" id="closeModal">×</button>
+            </div>
+            <div class="modal-content">
+                <div class="recording-options">
+                    <div class="recording-option" data-option="desktop">
+                        <div class="option-icon">🎧</div>
+                        <div class="option-content">
+                            <h3>Desktop Audio Capture</h3>
+                            <p>Capture system audio & transcribe automatically</p>
+                        </div>
+                        <div class="option-arrow">→</div>
+                    </div>
+                    
+                    <div class="recording-option" data-option="bot">
+                        <div class="option-icon">🤖</div>
+                        <div class="option-content">
+                            <h3>Bot recording</h3>
+                            <p>Record, transcribe & summarize a meeting</p>
+                        </div>
+                        <div class="option-arrow">→</div>
+                    </div>
+                    
+                    <div class="recording-option" data-option="upload">
+                        <div class="option-icon">📁</div>
+                        <div class="option-content">
+                            <h3>File upload</h3>
+                            <p>Transcribe & summarize existing recordings</p>
+                        </div>
+                        <div class="option-arrow">→</div>
+                    </div>
+                    
+                    <div class="recording-option" data-option="zoom">
+                        <div class="option-icon">📹</div>
+                        <div class="option-content">
+                            <h3>Zoom import</h3>
+                            <p>Import recordings from your Zoom account</p>
+                        </div>
+                        <div class="option-arrow">→</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Screen Selection Modal -->
+    <div class="modal-overlay" id="screenSelectionModal">
+        <div class="modal screen-selection-modal">
+            <div class="modal-header">
+                <h2>Choose what to record</h2>
+                <button class="modal-close" id="closeScreenModal">×</button>
+            </div>
+            <div class="modal-content">
+                <div class="source-grid" id="sourceGrid">
+                    <!-- Screen sources will be populated here -->
+                </div>
+                <div class="modal-actions">
+                    <button class="btn-secondary" id="cancelRecord">Cancel</button>
+                    <button class="btn-primary" id="startRecording" disabled>Start Recording</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- In-app overlay removed - using system overlay only -->
+
+    <!-- Login Modal removed - no forced authentication -->
+
+    <!-- Toast Container -->
+    <div class="toast-container" id="toastContainer"></div>
+
+    <script src="renderer.js"></script>
+</body>
+</html>

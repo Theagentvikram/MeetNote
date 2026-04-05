@@ -1,0 +1,35 @@
+# Production Requirements for DigitalOcean (1GB RAM)
+# Full Whisper AI Support
+
+# Core FastAPI dependencies
+fastapi==0.104.1
+uvicorn[standard]==0.24.0
+python-dotenv==1.2.1
+pydantic==2.12.4
+pydantic-settings==2.0.3
+python-multipart==0.0.6
+python-jose[cryptography]==3.3.0
+passlib[bcrypt]==1.7.4
+
+# Database
+sqlalchemy==2.0.23
+asyncpg==0.29.0  # For PostgreSQL async support
+alembic==1.13.1
+
+# AI Services
+openai==1.6.1  # For OpenRouter API
+httpx==0.25.2  # HTTP client for API calls
+
+# Audio Processing & Whisper
+faster-whisper==0.10.0  # Optimized Whisper implementation
+numpy==1.24.3
+soundfile==0.12.1  # Audio file I/O
+
+# File Processing
+aiofiles==23.2.1
+
+# DigitalOcean Spaces (S3-compatible)
+boto3==1.34.0  # For Spaces integration
+
+# WebSocket support
+websockets==12.0

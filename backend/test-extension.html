@@ -1,0 +1,75 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>MeetNote Extension Test</title>
+</head>
+<body>
+    <h1>🧪 MeetNote Extension Test</h1>
+    
+    <button onclick="testExtension()">Test Extension Communication</button>
+    <button onclick="testAuth()">Test Authentication</button>
+    <button onclick="testRecording()">Test Recording State</button>
+    
+    <div id="results" style="margin-top: 20px; padding: 10px; border: 1px solid #ccc;"></div>
+
+    <script>
+        const log = (message) => {
+            console.log(message);
+            document.getElementById('results').innerHTML += `<div>${message}</div>`;
+        };
+
+        function testExtension() {
+            log('🔍 Testing extension communication...');
+            
+            if (typeof chrome === 'undefined' || !chrome.runtime) {
+                log('❌ Chrome extension API not available');
+                return;
+            }
+            
+            try {
+                chrome.runtime.sendMessage({type: 'PING'}, (response) => {
+                    if (chrome.runtime.lastError) {
+                        log('❌ Extension error: ' + chrome.runtime.lastError.message);
+                    } else {
+                        log('✅ Extension responds: ' + JSON.stringify(response));
+                    }
+                });
+            } catch (e) {
+                log('❌ Exception: ' + e.message);
+            }
+        }
+
+        function testAuth() {
+            log('🔐 Testing authentication...');
+            
+            chrome.storage.local.get(['token'], (result) => {
+                if (result.token) {
+                    log('✅ Token found: ' + result.token.substring(0, 20) + '...');
+                } else {
+                    log('❌ No token found');
+                }
+            });
+        }
+
+        function testRecording() {
+            log('🎙️ Testing recording state...');
+            
+            chrome.runtime.sendMessage({type: 'GET_RECORDING_STATE'}, (response) => {
+                if (chrome.runtime.lastError) {
+                    log('❌ Error: ' + chrome.runtime.lastError.message);
+                } else {
+                    log('✅ Recording state: ' + JSON.stringify(response));
+                }
+            });
+        }
+
+        // Auto-run tests
+        setTimeout(() => {
+            log('🚀 Auto-running tests...');
+            testExtension();
+            setTimeout(testAuth, 1000);
+            setTimeout(testRecording, 2000);
+        }, 1000);
+    </script>
+</body>
+</html>

@@ -1,0 +1,86 @@
+# Alternative DigitalOcean App Platform Configuration
+# Optimized for cost-effectiveness while maintaining functionality
+
+name: meetnote-budget
+region: nyc
+
+# Environment variables
+envs:
+- key: ENVIRONMENT
+  value: production
+- key: DEBUG
+  value: "false"
+- key: SECRET_KEY
+  scope: RUN_TIME
+  type: SECRET
+- key: DATABASE_URL
+  scope: RUN_TIME
+  type: SECRET
+- key: OPENROUTER_API_KEY
+  scope: RUN_TIME
+  type: SECRET
+- key: WHISPER_MODEL
+  value: tiny  # Smaller model for budget deployment
+- key: WHISPER_DEVICE
+  value: cpu
+- key: WHISPER_COMPUTE_TYPE
+  value: int8
+- key: CORS_ORIGINS
+  value: "https://meetnoteapp.netlify.app,chrome-extension://*"
+
+# Services configuration - Budget version
+services:
+- name: meetnote-api-budget
+  source_dir: /backend
+  github:
+    repo: your-username/meetnote  # Update this
+    branch: main
+    deploy_on_push: true
+  
+  build_command: |
+    pip install --upgrade pip
+    pip install -r requirements-simple.txt  # Lighter requirements
+  
+  run_command: uvicorn app.main:app --host 0.0.0.0 --port $PORT --workers 1
+  
+  # Minimal resources for budget deployment
+  instance_count: 1
+  instance_size_slug: basic-xxs  # 512MB RAM - $5/month
+  
+  health_check:
+    http_path: /api/health
+    initial_delay_seconds: 90  # Longer delay for smaller instance
+    period_seconds: 60
+    timeout_seconds: 15
+    success_threshold: 1
+    failure_threshold: 5
+  
+  http_port: 8000
+  
+  routes:
+  - path: /
+  
+  cors:
+    allow_origins:
+    - exact: https://meetnoteapp.netlify.app
+    - regex: ^chrome-extension://.*$
+    allow_methods:
+    - GET
+    - POST
+    - OPTIONS
+    allow_headers:
+    - Content-Type
+    - Authorization
+    allow_credentials: true
+
+# No managed database for budget - use Supabase free tier
+# No static site - use Netlify free tier
+# No jobs - keep it minimal
+
+alerts:
+- rule: CPU_UTILIZATION
+  value: 90  # Higher threshold for budget
+- rule: MEM_UTILIZATION
+  value: 95
+- rule: RESTART_COUNT
+  value: 10

@@ -1,0 +1,8 @@
+0000000000000000000000000000000000000000 4f0e985e87f5ffbfd6adc6b99084a0d0e627e78c Theagentvikram <theagentvikram@gmail.com> 1772372530 +0530	commit (initial): Initial backend: FastAPI + Groq, Render-ready
+4f0e985e87f5ffbfd6adc6b99084a0d0e627e78c 51cfe8d682fb0f10bc55dc53ef2ed01d4a8b5839 Theagentvikram <theagentvikram@gmail.com> 1772372560 +0530	rebase (start): checkout origin/main
+51cfe8d682fb0f10bc55dc53ef2ed01d4a8b5839 4f0e985e87f5ffbfd6adc6b99084a0d0e627e78c Theagentvikram <theagentvikram@gmail.com> 1772372571 +0530	rebase (abort): returning to refs/heads/main
+4f0e985e87f5ffbfd6adc6b99084a0d0e627e78c 51cfe8d682fb0f10bc55dc53ef2ed01d4a8b5839 Theagentvikram <theagentvikram@gmail.com> 1772372571 +0530	reset: moving to origin/main
+51cfe8d682fb0f10bc55dc53ef2ed01d4a8b5839 d5aac6f8a0e1a7e2150d546cc735c705128f80ee Theagentvikram <theagentvikram@gmail.com> 1772373182 +0530	commit: Add Groq-powered FastAPI backend for Render deployment
+d5aac6f8a0e1a7e2150d546cc735c705128f80ee ab622ede7597efe946e9003e0d403549658415ea Theagentvikram <theagentvikram@gmail.com> 1772374083 +0530	commit: Add root Dockerfile for Render — runs clean Groq main.py
+ab622ede7597efe946e9003e0d403549658415ea 04ce7fe3c978e68df8a09cd9c0cc2103d1db25f6 Theagentvikram <theagentvikram@gmail.com> 1772374346 +0530	commit: Replace nested Dockerfile — run clean Groq main.py
+04ce7fe3c978e68df8a09cd9c0cc2103d1db25f6 0654a98ff183bc3846829f4bf32b2a2106ef6190 Theagentvikram <theagentvikram@gmail.com> 1772374963 +0530	commit: Fix: return snake_case keys matching Swift decoder

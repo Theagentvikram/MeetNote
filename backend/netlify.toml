@@ -1,0 +1,15 @@
+# Netlify Configuration for MeetNote Frontend
+
+[build]
+  base = "frontend"
+  command = "npm install && npm run build"
+  publish = "frontend/out"
+
+[[redirects]]
+  from = "/*"
+  to = "/index.html"
+  status = 200
+
+[build.environment]
+  NEXT_PUBLIC_API_URL = "https://meetnote-backend.onrender.com"
+  NODE_VERSION = "20"
