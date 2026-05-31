@@ -1,0 +1,11 @@
+node_modules/
+dist/
+swift-bridge/
+backend/__pycache__/
+backend/backend/__pycache__/
+backend/recordings/
+backend/uploads/
+backend/meetings_db.json
+*.pyc
+*.pyo
+.env
