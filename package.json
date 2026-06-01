@@ -40,22 +40,22 @@
       "swift-bridge/**",
       "package.json"
     ],
-    "extraResources": [
-      {
-        "from": "swift-bridge-prebuilt/swift-capture-bridge",
-        "to": "swift-bridge/swift-capture-bridge"
-      },
-      {
-        "from": "entitlements.mac.plist",
-        "to": "entitlements.mac.plist"
-      }
-    ],
     "mac": {
       "category": "public.app-category.productivity",
       "icon": "assets/icon.png",
       "target": [
         { "target": "dmg", "arch": ["arm64"] },
         { "target": "zip", "arch": ["arm64"] }
+      ],
+      "extraResources": [
+        {
+          "from": "swift-bridge-prebuilt/swift-capture-bridge",
+          "to": "swift-bridge/swift-capture-bridge"
+        },
+        {
+          "from": "entitlements.mac.plist",
+          "to": "entitlements.mac.plist"
+        }
       ],
       "entitlements": "entitlements.mac.plist",
       "entitlementsInherit": "entitlements.mac.plist",
@@ -69,15 +69,18 @@
     },
     "win": {
       "icon": "assets/icon.png",
+      "artifactName": "MeetNote-Setup-${version}-${arch}.${ext}",
       "target": [
         { "target": "nsis", "arch": ["x64"] }
       ]
     },
     "nsis": {
       "oneClick": false,
+      "perMachine": false,
       "allowToChangeInstallationDirectory": true,
       "createDesktopShortcut": true,
-      "createStartMenuShortcut": true
+      "createStartMenuShortcut": true,
+      "shortcutName": "MeetNote"
     }
   }
 }

@@ -611,15 +611,21 @@ if (process.platform === 'darwin') {
 // ── Window ────────────────────────────────────────────────────────────────────
 
 function createWindow() {
+  const isMac = process.platform === 'darwin';
   mainWindow = new BrowserWindow({
     width: 1400,
     height: 900,
     minWidth: 1000,
     minHeight: 700,
-    titleBarStyle: 'hiddenInset',
-    trafficLightPosition: { x: 20, y: 18 },
-    vibrancy: 'under-window',
-    visualEffectState: 'active',
+    // mac-only window chrome; Windows/Linux use the standard frame
+    ...(isMac
+      ? {
+          titleBarStyle: 'hiddenInset',
+          trafficLightPosition: { x: 20, y: 18 },
+          vibrancy: 'under-window',
+          visualEffectState: 'active'
+        }
+      : {}),
     webPreferences: {
       nodeIntegration: true,
       contextIsolation: false,

@@ -1,11 +1,25 @@
 # MeetNote
 
-AI meeting assistant for macOS. Records meetings, transcribes with speaker
-labels (YOU / OTHER), summarises, and gives **live AI coaching** through a
-floating overlay while you're in a call.
+AI meeting assistant for **macOS and Windows**. Records meetings, transcribes
+with speaker labels (YOU / OTHER), summarises, and gives **live AI coaching**
+through a floating overlay while you're in a call.
 
 Built by [TechAbhee](https://github.com/Theagentvikram). Electron desktop app
 + a Groq-powered FastAPI backend deployed on Render.
+
+---
+
+## ⬇️ Download
+
+Grab the latest installer from the **[Releases page](https://github.com/Theagentvikram/MeetNote/releases/latest)**:
+
+| Platform | File | Notes |
+|----------|------|-------|
+| 🪟 **Windows** | `MeetNote-Setup-*.exe` | Installs per-user, no admin needed. SmartScreen may warn (unsigned) → **More info → Run anyway**. |
+| 🍎 **macOS** (Apple Silicon) | `MeetNote-*-arm64.dmg` | Open DMG → drag to Applications. First launch: right-click → **Open** (ad-hoc signed). |
+
+> The app works against the hosted backend out of the box — no setup, no API
+> keys for end users. Just install and open.
 
 ---
 
@@ -45,18 +59,33 @@ self-hosted pyannote model on a larger instance; not enabled in this free build.
 
 ---
 
-## Install (macOS)
+## Install
 
-1. Download the latest `MeetNote-<version>-arm64.dmg` from
-   [Releases](https://github.com/Theagentvikram/MeetNote/releases).
+### macOS (Apple Silicon)
+
+1. Download `MeetNote-<version>-arm64.dmg` from [Releases](https://github.com/Theagentvikram/MeetNote/releases/latest).
 2. Open the DMG, drag **MeetNote** to **Applications**.
-3. First launch: the app is ad-hoc signed, so right-click → **Open** to bypass
-   Gatekeeper (or run `xattr -cr /Applications/MeetNote.app`).
-4. Grant permissions when prompted:
-   - **Microphone** — record your voice
-   - **Screen Recording** — capture system audio from Zoom/Meet/Teams
+3. First launch: ad-hoc signed, so right-click → **Open** to bypass Gatekeeper
+   (or `xattr -cr /Applications/MeetNote.app`).
+4. Grant **Microphone** + **Screen Recording** when prompted (screen recording
+   is needed to capture system/other-party audio).
 
-That's it. The app points at the hosted backend out of the box — no setup.
+macOS captures audio via a bundled native Swift bridge (ScreenCaptureKit).
+
+### Windows (x64)
+
+1. Download `MeetNote-Setup-<version>-x64.exe` from [Releases](https://github.com/Theagentvikram/MeetNote/releases/latest).
+2. Run it. If SmartScreen warns (the app is unsigned), click **More info → Run
+   anyway**. Installs per-user — no admin required.
+3. Allow **Microphone** access when Windows prompts.
+4. For system/other-party audio, MeetNote captures **loopback audio** via the
+   built-in screen-share picker — when prompted, share your screen so the
+   meeting audio is captured (audio is kept, video is discarded).
+
+Windows captures audio through Electron's `getDisplayMedia` loopback — no native
+helper needed.
+
+Both platforms point at the hosted Render backend out of the box — no setup.
 
 ---
 
@@ -93,10 +122,24 @@ npm install
 npm run dev        # launches Electron against the Render backend
 ```
 
-### Build the DMG
+### Build installers
 
 ```bash
-npm run build:mac  # → dist/mac-arm64/MeetNote.app + dist/MeetNote-*.dmg
+# macOS (run on a Mac) → dist/MeetNote-*.dmg
+npm run build:mac
+
+# Windows (run on a Windows PC) → dist/MeetNote-Setup-*-x64.exe
+npm run build:win
+```
+
+> The Windows `.exe` must be built on Windows (or via the GitHub Actions
+> workflow) — it can't be cross-built from macOS without Wine. Pushing a
+> `vX.Y.Z` git tag triggers `.github/workflows/release.yml`, which builds both
+> the `.exe` and `.dmg` on hosted runners and attaches them to a GitHub Release.
+
+```bash
+# cut a release with both installers
+git tag v1.0.0 && git push origin v1.0.0
 ```
 
 ### Backend (local, optional)
