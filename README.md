@@ -116,11 +116,12 @@ uvicorn main:app --reload --port 8000
 
 ## Deployment (Render)
 
-The backend deploys from `render.yaml` (Blueprint) with **Root Directory =
-`backend`**.
+The backend deploys via **Docker** from `render.yaml`, with **Root Directory =
+`backend`** and `backend/Dockerfile`.
 
 1. Connect this repo as a Render Blueprint, or point an existing Web Service at it.
-2. Set **Root Directory** to `backend`.
+2. Set **Root Directory** to `backend` and **Runtime** to `Docker`
+   (Render finds `backend/Dockerfile`).
 3. Add the `GROQ_API_KEY` env var in the Render dashboard (marked `sync: false`).
 4. Deploy. Verify the coach route exists:
 
