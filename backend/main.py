@@ -134,6 +134,7 @@ async def transcribe(
 
     diarized_transcript = None
     speakers = None
+    confidence = 0.0
 
     try:
         if mic_present and sys_present:
@@ -145,13 +146,13 @@ async def transcribe(
             duration = 0
 
             if len(mic_bytes) > 0 and len(sys_bytes) > 0:
-                transcript, duration, diarized_transcript, speakers = await _transcribe_dual(
+                transcript, duration, diarized_transcript, speakers, confidence = await _transcribe_dual(
                     mic_bytes, sys_bytes, suffix, lang_arg, meeting_id
                 )
             else:
                 # Fall back to merged
                 audio_bytes = await audio_file.read()
-                transcript, duration = await _transcribe_single(
+                transcript, duration, confidence = await _transcribe_single(
                     audio_bytes, suffix, lang_arg, audio_file.filename, meeting_id
                 )
         else:
@@ -159,7 +160,7 @@ async def transcribe(
             audio_bytes = await audio_file.read()
             if len(audio_bytes) == 0:
                 raise HTTPException(status_code=400, detail="Empty audio file")
-            transcript, duration = await _transcribe_single(
+            transcript, duration, confidence = await _transcribe_single(
                 audio_bytes, suffix, lang_arg, audio_file.filename, meeting_id
             )
 
@@ -182,7 +183,7 @@ async def transcribe(
         "key_points": key_points,
         "action_items": action_items,
         "duration": duration,
-        "confidence": 0.92,
+        "confidence": round(confidence, 2) if confidence else 0.9,
         "language": lang_arg or "en",
         "created_at": datetime.utcnow().isoformat() + "Z",
     }
@@ -220,6 +221,83 @@ def _looks_hallucinated(text: str) -> bool:
         if uniq / len(words) < 0.4:  # <40% unique words
             return True
     return False
+
+
+# Anchors Whisper so it transcribes verbatim instead of inventing fluent-sounding
+# filler. Helps a lot on short / noisy meeting clips.
+_TRANSCRIBE_PROMPT = (
+    "The following is a clear business meeting conversation. "
+    "Transcribe exactly what is said, verbatim, without adding or repeating words."
+)
+
+
+def _keep_confident_segments(resp):
+    """
+    Return only Whisper segments that look like real, confident speech.
+    Whisper flags invented speech with high no_speech_prob + very low avg_logprob;
+    we also drop near-duplicate consecutive segments (the classic repetition loop).
+    """
+    segments = getattr(resp, "segments", None) or []
+    kept = []
+    prev_norm = None
+    for s in segments:
+        g = (lambda k, d: s.get(k, d) if isinstance(s, dict) else getattr(s, k, d))
+        no_speech = float(g("no_speech_prob", 0.0) or 0.0)
+        avg_lp = float(g("avg_logprob", 0.0) or 0.0)
+        seg_text = (g("text", "") or "").strip()
+        if not seg_text:
+            continue
+        if no_speech > 0.6:          # likely silence/noise
+            continue
+        if avg_lp < -1.0:            # very low confidence → hallucination
+            continue
+        norm = seg_text.lower()
+        if norm == prev_norm:        # exact repeat of previous segment → loop
+            continue
+        prev_norm = norm
+        kept.append(seg_text)
+    return kept
+
+
+def _collapse_repetition(text: str) -> str:
+    """Remove repeated phrases/sentences Whisper loops on (exact and near-exact)."""
+    import re as _re
+    # collapse an exactly repeated run of words that appears back-to-back
+    text = _re.sub(r"\b(\w[\w ,'-]{8,}?)\s+\1\b", r"\1", text, flags=_re.IGNORECASE)
+    # collapse repeated single words ("the the the")
+    text = _re.sub(r"\b(\w+)( \1\b){2,}", r"\1", text, flags=_re.IGNORECASE)
+    text = _re.sub(r"\s{2,}", " ", text).strip()
+
+    # Drop near-duplicate sentences: Whisper often loops the same clause with tiny
+    # variations. Keep first occurrence, skip later ones with high word overlap.
+    parts = _re.split(r"(?<=[.!?])\s+", text)
+    seen = []
+    out = []
+    for p in parts:
+        words = set(_re.findall(r"\w+", p.lower()))
+        if len(words) >= 4 and any(
+            len(words & s) / max(1, len(words | s)) > 0.7 for s in seen
+        ):
+            continue
+        seen.append(words)
+        out.append(p)
+    return " ".join(out).strip()
+
+
+def _avg_confidence(resp) -> float:
+    """Mean per-segment confidence derived from avg_logprob, clamped to [0,1]."""
+    import math as _math
+    segments = getattr(resp, "segments", None) or []
+    lps = []
+    for s in segments:
+        g = (lambda k, d: s.get(k, d) if isinstance(s, dict) else getattr(s, k, d))
+        lp = g("avg_logprob", None)
+        if lp is not None:
+            lps.append(float(lp))
+    if not lps:
+        return 0.0
+    # avg_logprob is ~[-1, 0]; map to a probability-ish score
+    return max(0.0, min(1.0, _math.exp(sum(lps) / len(lps))))
 
 
 async def _live_transcribe(audio_bytes: bytes, language, meeting_id: str, speaker: str = "?") -> str:
@@ -273,7 +351,7 @@ async def _live_transcribe(audio_bytes: bytes, language, meeting_id: str, speake
 # ── Transcription helpers ─────────────────────────────────────────────────────
 
 async def _transcribe_single(audio_bytes: bytes, suffix: str, language, filename, meeting_id: str):
-    """Transcribe a single audio file. Returns (transcript_text, duration_seconds)."""
+    """Transcribe a single audio file. Returns (transcript_text, duration_seconds, confidence)."""
     logger.info(f"[{meeting_id}] Transcribing {len(audio_bytes)//1024}KB single track…")
     with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as tmp:
         tmp.write(audio_bytes)
@@ -285,8 +363,13 @@ async def _transcribe_single(audio_bytes: bytes, suffix: str, language, filename
                 file=(filename or f"audio{suffix}", f),
                 language=language,
                 response_format="verbose_json",
+                temperature=0.0,
+                prompt=_TRANSCRIBE_PROMPT,
             )
-        return resp.text.strip(), int(getattr(resp, "duration", 0))
+        kept = _keep_confident_segments(resp)
+        text = " ".join(kept).strip() if kept else (getattr(resp, "text", "") or "").strip()
+        text = _collapse_repetition(text)
+        return text, int(getattr(resp, "duration", 0)), _avg_confidence(resp)
     finally:
         os.unlink(tmp_path)
 
@@ -315,6 +398,8 @@ async def _transcribe_dual(mic_bytes: bytes, sys_bytes: bytes, suffix: str, lang
                 language=language,
                 response_format="verbose_json",
                 timestamp_granularities=["segment"],
+                temperature=0.0,
+                prompt=_TRANSCRIBE_PROMPT,
             )
         with open(sys_path, "rb") as f:
             sys_resp = _groq_client().audio.transcriptions.create(
@@ -323,6 +408,8 @@ async def _transcribe_dual(mic_bytes: bytes, sys_bytes: bytes, suffix: str, lang
                 language=language,
                 response_format="verbose_json",
                 timestamp_granularities=["segment"],
+                temperature=0.0,
+                prompt=_TRANSCRIBE_PROMPT,
             )
 
     finally:
@@ -345,7 +432,7 @@ async def _transcribe_dual(mic_bytes: bytes, sys_bytes: bytes, suffix: str, lang
     )
 
     if not mic_segments and not sys_segments:
-        return "", duration, [], {}
+        return "", duration, [], {}, 0.0
 
     # Merge and sort by start time
     all_segments = mic_segments + sys_segments
@@ -366,7 +453,7 @@ async def _transcribe_dual(mic_bytes: bytes, sys_bytes: bytes, suffix: str, lang
             cur_text.append(text)
         else:
             if cur_speaker and cur_text:
-                merged_text = ' '.join(cur_text)
+                merged_text = _collapse_repetition(' '.join(cur_text))
                 lines.append(f"{cur_speaker}: {merged_text}")
                 diarized.append({"speaker": "you" if cur_speaker == "YOU" else "other", "text": merged_text, "start": cur_start})
             cur_speaker = seg["speaker"]
@@ -374,26 +461,39 @@ async def _transcribe_dual(mic_bytes: bytes, sys_bytes: bytes, suffix: str, lang
             cur_start = seg["start"]
 
     if cur_speaker and cur_text:
-        merged_text = ' '.join(cur_text)
+        merged_text = _collapse_repetition(' '.join(cur_text))
         lines.append(f"{cur_speaker}: {merged_text}")
         diarized.append({"speaker": "you" if cur_speaker == "YOU" else "other", "text": merged_text, "start": cur_start})
 
     transcript = "\n".join(lines)
     speakers = {"you": "You", "other": "Other"}
-    logger.info(f"[{meeting_id}] Dual transcript: {len(lines)} speaker turns, diarized={len(diarized)} segs")
-    return transcript, duration, diarized, speakers
+    confidence = max(_avg_confidence(mic_resp), _avg_confidence(sys_resp))
+    logger.info(f"[{meeting_id}] Dual transcript: {len(lines)} speaker turns, diarized={len(diarized)} segs, conf={confidence:.2f}")
+    return transcript, duration, diarized, speakers, confidence
 
 
 def _extract_segments(resp, speaker_label: str):
-    """Extract timed segments from a Whisper verbose_json response."""
+    """Extract confident, de-duplicated timed segments from a Whisper response."""
     segments = getattr(resp, "segments", None) or []
     result = []
+    prev_norm = None
     for seg in segments:
-        start = getattr(seg, "start", 0.0) if not isinstance(seg, dict) else seg.get("start", 0.0)
-        text = getattr(seg, "text", "") if not isinstance(seg, dict) else seg.get("text", "")
-        result.append({"speaker": speaker_label, "start": float(start), "text": text})
-    # Fallback: if no segments, treat whole text as one segment
-    if not result and resp.text.strip():
+        g = (lambda k, d: seg.get(k, d) if isinstance(seg, dict) else getattr(seg, k, d))
+        start = float(g("start", 0.0) or 0.0)
+        text = (g("text", "") or "").strip()
+        no_speech = float(g("no_speech_prob", 0.0) or 0.0)
+        avg_lp = float(g("avg_logprob", 0.0) or 0.0)
+        if not text:
+            continue
+        if no_speech > 0.6 or avg_lp < -1.0:   # silence/noise or hallucination
+            continue
+        norm = text.lower()
+        if norm == prev_norm:                  # repeated segment loop
+            continue
+        prev_norm = norm
+        result.append({"speaker": speaker_label, "start": start, "text": text})
+    # Fallback: if filtering removed everything but there is raw text, keep it.
+    if not result and (getattr(resp, "text", "") or "").strip():
         result.append({"speaker": speaker_label, "start": 0.0, "text": resp.text.strip()})
     return result
 
@@ -457,17 +557,23 @@ async def _summarise(transcript: str, title: str, meeting_id: str):
             condensed.append(await loop.run_in_executor(None, _condense_chunk, ch, i + 1, meeting_id))
         source = "\n\n".join(condensed)
 
-    prompt = f"""You are an expert meeting analyst. Analyse this meeting and return ONLY valid JSON, no markdown.
-Be thorough and specific — capture the real substance, names, numbers, and decisions.
+    prompt = f"""You are an expert meeting analyst. Analyse the transcript and return ONLY valid JSON.
 
-Transcript / notes:
+Rules:
+- Base everything strictly on the transcript. Do NOT invent facts, names, or numbers.
+- If the transcript is too short, empty, or incoherent to analyse, say so honestly in the
+  summary (e.g. "The recording was too short or unclear to extract a meaningful summary.")
+  and return empty keyPoints / actionItems rather than making things up.
+- Be specific and concrete when there IS substance: capture decisions, topics, numbers, names.
+
+Transcript:
 {source[:14000]}
 
-Return this exact JSON structure:
+Return exactly this JSON shape:
 {{
-  "title": "Short specific meeting title (4-8 words, capture the actual topic, no generic words)",
-  "summary": "A DETAILED multi-paragraph executive summary (at least 5-8 sentences): what was discussed, key arguments, decisions made, context, and outcome. Be specific, not vague.",
-  "keyPoints": ["specific key point with detail", "another", "... 5-8 points covering the main substance"],
+  "title": "Short specific meeting title (4-8 words capturing the actual topic; avoid generic words)",
+  "summary": "A clear executive summary: what was discussed, key points, decisions, and outcome. Multiple sentences when there is enough content.",
+  "keyPoints": ["specific key point", "..."],
   "actionItems": ["concrete action item with owner/context if known", "..."]
 }}"""
 
@@ -476,8 +582,9 @@ Return this exact JSON structure:
         chat = _groq_client().chat.completions.create(
             model="llama-3.3-70b-versatile",
             messages=[{"role": "user", "content": prompt}],
-            temperature=0.3,
+            temperature=0.2,
             max_tokens=2048,
+            response_format={"type": "json_object"},
         )
         raw = chat.choices[0].message.content.strip()
 
