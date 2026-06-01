@@ -6,10 +6,11 @@
   "scripts": {
     "start": "unset ELECTRON_RUN_AS_NODE && ./node_modules/.bin/electron .",
     "dev": "unset ELECTRON_RUN_AS_NODE && NODE_ENV=development ./node_modules/.bin/electron .",
-    "build:mac": "electron-builder --mac --arm64 && xattr -cr dist/mac-arm64/MeetNote.app && codesign --force --deep --sign - --entitlements entitlements.mac.plist dist/mac-arm64/MeetNote.app",
+    "build:mac": "electron-builder --mac --arm64 && npm run sign:mac",
+    "sign:mac": "xattr -cr dist/mac-arm64/MeetNote.app && codesign --force --sign - --entitlements entitlements.mac.plist --timestamp=none dist/mac-arm64/MeetNote.app/Contents/Resources/swift-bridge/swift-capture-bridge && codesign --force --sign - --entitlements entitlements.mac.plist --timestamp=none --deep dist/mac-arm64/MeetNote.app && codesign --verify --strict dist/mac-arm64/MeetNote.app && echo SIGNED $(codesign -dvvv dist/mac-arm64/MeetNote.app 2>&1 | grep '^CDHash=')",
     "build:win": "electron-builder --win --x64",
     "build:all": "npm run build:mac && npm run build:win",
-    "install:mac": "rm -rf /Applications/MeetNote.app && cp -r dist/mac-arm64/MeetNote.app /Applications/MeetNote.app && xattr -cr /Applications/MeetNote.app && codesign --force --sign - --entitlements entitlements.mac.plist /Applications/MeetNote.app/Contents/Resources/swift-bridge/swift-capture-bridge && codesign --force --sign - --entitlements entitlements.mac.plist /Applications/MeetNote.app && open /Applications/MeetNote.app"
+    "install:mac": "rm -rf /Applications/MeetNote.app && cp -Rp dist/mac-arm64/MeetNote.app /Applications/MeetNote.app && xattr -cr /Applications/MeetNote.app && codesign --verify --strict /Applications/MeetNote.app && open /Applications/MeetNote.app && echo INSTALLED $(codesign -dvvv /Applications/MeetNote.app 2>&1 | grep '^CDHash=')"
   },
   "author": "TechAbhee",
   "license": "MIT",
