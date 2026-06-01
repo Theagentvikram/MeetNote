@@ -15,6 +15,12 @@ dist/
 build/
 .next/
 
+# Swift bridge dev build cache
+.swift-bridge/
+
+# Archived / legacy code — kept locally, never pushed
+Archive/
+
 # Local env files
 .env
 .env.*
