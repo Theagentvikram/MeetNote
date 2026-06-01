@@ -30,6 +30,19 @@ live coaching. There is no localhost dependency in shipped builds.
 | **Record** | Capture mic + system audio → upload → transcribe + summarise | `POST /api/transcription/audio` |
 | **Live coach** | Stream tagged audio blobs over WebSocket → live transcript + coaching suggestions pushed to the floating overlay | `WS /ws/sessions/{id}/stream` |
 
+### Speaker labeling
+
+Speakers are separated by **audio channel**, not by voice diarization:
+
+- **mic track → `YOU`**
+- **system audio track → `OTHER`**
+
+This works perfectly for 1:1 calls. In a call with multiple remote
+participants, all of them are captured but share the single `OTHER` label —
+the transcript cannot tell remote speakers apart. True per-speaker diarization
+(Speaker 1/2/3) would require a paid STT provider (Deepgram/AssemblyAI) or a
+self-hosted pyannote model on a larger instance; not enabled in this free build.
+
 ---
 
 ## Install (macOS)
