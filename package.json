@@ -1,6 +1,6 @@
 {
   "name": "meetnote",
-  "version": "1.0.0",
+  "version": "1.0.2",
   "description": "MeetNote Summaries — AI Meeting Assistant by TechAbhee",
   "main": "main.js",
   "scripts": {

@@ -1,11 +1,28 @@
 'use strict';
 const { ipcRenderer } = require('electron');
 
+// ─── Platform ─────────────────────────────────────────────────────────────────
+// Single source of truth for platform branching. Set MEETNOTE_FORCE_PLATFORM=win32
+// (or darwin) to simulate another OS on your dev machine — this lets us exercise the
+// Windows capture path on a Mac without a Windows box. Falls back to the real OS.
+const PLATFORM = process.env.MEETNOTE_FORCE_PLATFORM || process.platform;
+const IS_MAC = PLATFORM === 'darwin';
+const IS_WIN = PLATFORM === 'win32';
+if (process.env.MEETNOTE_FORCE_PLATFORM) {
+  console.warn(`[platform] FORCED to "${PLATFORM}" (real: ${process.platform}) — simulation mode`);
+}
+
 // ─── State ────────────────────────────────────────────────────────────────────
 const DEFAULT_BACKEND_URL = 'https://meetnote-18tt.onrender.com';
 const LEGACY_BACKEND_HOSTS = new Set(['meetnote-backend.onrender.com']);
 const LOCAL_MEETINGS_KEY = 'meetnote.cachedMeetings.v1';
-const ENABLE_SWIFT_NATIVE_CAPTURE = true;
+// Swift native capture is mac-only — never use it when simulating/running Windows.
+const ENABLE_SWIFT_NATIVE_CAPTURE = IS_MAC;
+
+// Last diagnostic from main's display-media handler (see display-media-diagnostic
+// IPC). Lets the "no system audio" error explain WHY on Windows (no sources vs
+// exception vs loopback yielded no track) instead of a generic message.
+let lastDisplayMediaDiagnostic = null;
 
 let backendUrl       = DEFAULT_BACKEND_URL;
 let isRecording      = false;
@@ -243,6 +260,46 @@ function schedulePersistentSystemStreamRelease() {
   }, SYSTEM_STREAM_KEEPALIVE_MS);
 }
 
+// Builds a precise "no system audio" error. On Windows the generic message hides
+// the real cause; the main-process display-media handler reports it via the
+// display-media-diagnostic IPC, which we fold in here so the popup is actionable.
+function buildSystemAudioError({ gotStream } = {}) {
+  if (IS_MAC) {
+    return 'System audio unavailable. Check Screen Recording permission in System Settings → Privacy & Security.';
+  }
+
+  const diag = lastDisplayMediaDiagnostic;
+
+  // No source could be enumerated → handler returned an empty stream.
+  if (diag && diag.ok === false && diag.reason === 'no-sources') {
+    return 'System audio unavailable: Windows returned no screen to capture. ' +
+      'Open Settings → Privacy & security → Screen recording (or App permissions) and ' +
+      'allow MeetNote, then restart the app.';
+  }
+
+  // The handler threw (e.g. desktopCapturer failed).
+  if (diag && diag.ok === false && diag.reason === 'exception') {
+    return `System audio unavailable: screen capture failed (${diag.message || 'unknown error'}). ` +
+      'Restart the app; if it persists, allow MeetNote under Windows Screen recording permissions.';
+  }
+
+  // A source WAS selected but no audio track came back → loopback yielded nothing.
+  // This means audio:'loopback' produced no track on this Windows build.
+  if (diag && diag.ok === true && gotStream) {
+    return 'System audio unavailable: Windows gave a screen but no audio track ' +
+      '(loopback returned silence). Make sure audio is actually playing, and that ' +
+      'the meeting app is outputting to the default playback device.';
+  }
+  if (diag && diag.ok === true) {
+    return 'System audio unavailable: a screen was selected but loopback produced no audio track. ' +
+      'This Windows configuration may not support system-audio loopback.';
+  }
+
+  // No diagnostic arrived at all → handler never fired (rare).
+  return 'System audio unavailable. When the screen-share prompt appears, choose a ' +
+    'screen/window and make sure "Share audio" / "Share system audio" is checked.';
+}
+
 async function ensurePersistentSystemStream() {
   clearPersistentSystemKeepAliveTimer();
 
@@ -264,7 +321,7 @@ async function ensurePersistentSystemStream() {
   const track = stream ? getLiveAudioTrack(stream) : null;
   if (!stream || !track) {
     stream?.getTracks().forEach(t => t.stop());
-    throw new Error('System audio unavailable. Check Screen Recording permission in System Settings → Privacy & Security.');
+    throw new Error(buildSystemAudioError({ gotStream: !!stream }));
   }
 
   track.addEventListener('ended', () => {
@@ -417,8 +474,10 @@ document.addEventListener('DOMContentLoaded', async () => {
     backendUrl = DEFAULT_BACKEND_URL;
   }
 
-  // Check backend health
-  await checkBackendHealth();
+  // Check backend health. coldStart waits out a sleeping Render free-tier service
+  // (15–50s wake) instead of immediately reporting "Backend Offline" on launch.
+  setPillState('connecting');
+  await checkBackendHealth({ coldStart: true });
   startBackendHealthPolling();
 
   // Load meetings on startup
@@ -464,6 +523,13 @@ document.addEventListener('DOMContentLoaded', async () => {
   ipcRenderer.on('meeting-detected', (_, info) => {
     if (isRecording || liveActive) return;
     showMeetingPrompt(info && info.platform ? info.platform : 'Meeting');
+  });
+
+  // IPC: main's display-media handler reports why system-audio capture did or
+  // didn't get a source. Cached so the error popup can explain a Windows failure.
+  ipcRenderer.on('display-media-diagnostic', (_, info) => {
+    lastDisplayMediaDiagnostic = info || null;
+    console.log('[display-media-diagnostic]', info);
   });
 
   window.addEventListener('beforeunload', () => {
@@ -517,24 +583,54 @@ function switchView(name) {
 }
 
 // ─── Backend Health ───────────────────────────────────────────────────────────
-async function checkBackendHealth() {
+// The backend runs on Render's free tier, which spins the service down after
+// inactivity. A cold start takes ~15–50s to wake — far longer than a normal
+// request. A single short-timeout probe therefore reports "Backend Offline" on
+// first launch even though the service is fine, just asleep. This was the Windows
+// "not connected" symptom: a fresh install almost always hits a cold backend.
+//
+// setPillState renders one of three states; the amber "Connecting…" state is shown
+// while we wait out a cold start instead of immediately flashing red.
+function setPillState(state) {
   const dot   = document.getElementById('backendDot');
   const label = document.getElementById('backendLabel');
+  if (dot)   dot.className = `pill-dot ${state === 'online' ? 'online' : state === 'connecting' ? 'connecting' : 'offline'}`;
+  if (label) label.textContent =
+    state === 'online' ? 'Backend Online' :
+    state === 'connecting' ? 'Connecting…' : 'Backend Offline';
+}
+
+// One probe. Returns true only on a 2xx /api/health response.
+async function probeBackend(target, timeoutMs) {
+  try {
+    const r = await fetch(`${target}/api/health`, { signal: AbortSignal.timeout(timeoutMs) });
+    return r.ok;
+  } catch {
+    return false;
+  }
+}
+
+// A "wake-aware" health check. The first probe uses a normal timeout; if it fails
+// we keep probing with a longer per-attempt timeout, which both waits out and
+// actively pings the service awake. `coldStart:true` (used at launch) spends up to
+// ~60s before giving up so a sleeping Render service has time to wake.
+async function checkBackendHealth({ coldStart = false } = {}) {
   const target = resolveBackendUrl(backendUrl);
   backendUrl = target;
-  let online = false;
 
-  try {
-    const r = await fetch(`${target}/api/health`, { signal: AbortSignal.timeout(8000) });
-    if (r.ok) {
-      online = true;
-      if (dot) dot.className = 'pill-dot online';
-      if (label) label.textContent = 'Backend Online';
-    } else throw new Error();
-  } catch {
-    if (dot) dot.className = 'pill-dot offline';
-    if (label) label.textContent = 'Backend Offline';
+  // First, a quick probe — if the service is already warm this returns instantly.
+  let online = await probeBackend(target, 8000);
+
+  if (!online && coldStart) {
+    // Service may be asleep. Show "Connecting…" (not "Offline") and keep probing
+    // with longer timeouts to wake + reach it. ~4 × 15s ≈ 60s worst case.
+    setPillState('connecting');
+    for (let attempt = 0; attempt < 4 && !online; attempt++) {
+      online = await probeBackend(target, 15000);
+    }
   }
+
+  setPillState(online ? 'online' : 'offline');
 
   const changed = lastBackendOnline !== null && lastBackendOnline !== online;
   lastBackendOnline = online;
@@ -975,15 +1071,20 @@ async function beginRecording() {
     shouldCaptureSystemAudio = captureSystemAudio;
     const useSwiftCapture =
       ENABLE_SWIFT_NATIVE_CAPTURE &&
-      process.platform === 'darwin' &&
+      IS_MAC &&
       captureSystemAudio &&
       !swiftCaptureTemporarilyDisabled;
     usingSwiftNativeCapture = false;
 
-    const mediaPermissions = await ipcRenderer.invoke('get-media-permissions').catch(() => null);
-    if (captureSystemAudio && mediaPermissions && mediaPermissions.screen !== 'granted') {
-      await ipcRenderer.invoke('open-privacy-settings', 'screen').catch(() => false);
-      throw new Error('Screen Recording permission is required for system audio. Allow MeetNote in macOS Privacy settings and restart the app. If running via npm run dev, also allow Terminal.');
+    // The macOS Screen Recording permission gate only applies on macOS. On Windows
+    // there is no such system permission for loopback capture, and get-media-permissions
+    // already reports screen:'granted' there — but we guard explicitly to be safe.
+    if (IS_MAC) {
+      const mediaPermissions = await ipcRenderer.invoke('get-media-permissions').catch(() => null);
+      if (captureSystemAudio && mediaPermissions && mediaPermissions.screen !== 'granted') {
+        await ipcRenderer.invoke('open-privacy-settings', 'screen').catch(() => false);
+        throw new Error('Screen Recording permission is required for system audio. Allow MeetNote in macOS Privacy settings and restart the app. If running via npm run dev, also allow Terminal.');
+      }
     }
 
     if (useSwiftCapture) {
@@ -1021,7 +1122,7 @@ async function beginRecording() {
       }
     }
 
-    if (captureSystemAudio && process.platform === 'darwin' && !usingSwiftNativeCapture) {
+    if (captureSystemAudio && IS_MAC && !usingSwiftNativeCapture) {
       showToast('System audio for this run is browser loopback (non-native).', 'info');
     }
 
@@ -2090,7 +2191,13 @@ function renderTranscript(el, transcript) {
   if (!el) return;
   el.innerHTML = '';
   const text = (transcript || '').trim();
-  if (!text) { el.textContent = 'No transcript available.'; return; }
+  if (!text) {
+    const empty = document.createElement('div');
+    empty.className = 'tx-empty';
+    empty.textContent = 'No transcript available.';
+    el.appendChild(empty);
+    return;
+  }
 
   const labelRe = /^\s*(YOU|OTHER|You|Other|Speaker)\s*:\s*/;
   const lines = text.split('\n').map(l => l.trim()).filter(Boolean);
@@ -2131,13 +2238,20 @@ function renderTranscript(el, transcript) {
   }
   flush();
 
-  // No speaker labels at all → show as clean paragraphs by sentence grouping.
+  // No speaker labels at all → show as clean paragraphs by sentence grouping
+  // so a long monologue reads as several short paragraphs, not one wall of text.
   if (!hadLabels) {
     el.innerHTML = '';
-    const p = document.createElement('div');
-    p.className = 'tx-text';
-    p.textContent = text.replace(/\s+/g, ' ').trim();
-    el.appendChild(p);
+    const clean = text.replace(/\s+/g, ' ').trim();
+    const sentences = clean.match(/[^.!?]+[.!?]+|\S+$/g) || [clean];
+    const PER_PARA = 3;
+    for (let i = 0; i < sentences.length; i += PER_PARA) {
+      const p = document.createElement('div');
+      p.className = 'tx-text';
+      p.style.marginBottom = '12px';
+      p.textContent = sentences.slice(i, i + PER_PARA).join(' ').trim();
+      el.appendChild(p);
+    }
   }
 }
 
@@ -2148,16 +2262,7 @@ function openMeetingDetail(m) {
   document.getElementById('detailConfidence').textContent =
     m.confidence ? `${Math.round(m.confidence * 100)}% confidence` : '';
 
-  const summaryEl = document.getElementById('summaryText');
-  const summaryStr = (m.summary || 'No summary available.').trim();
-  summaryEl.innerHTML = '';
-  summaryStr.split(/\n\s*\n|\n/).filter(Boolean).forEach(para => {
-    const p = document.createElement('p');
-    p.style.marginBottom = '12px';
-    p.style.lineHeight = '1.6';
-    p.textContent = para.trim();
-    summaryEl.appendChild(p);
-  });
+  renderRichSummary(document.getElementById('summaryText'), m);
 
   const kpList = document.getElementById('keypointsList');
   kpList.innerHTML = '';
@@ -2178,6 +2283,17 @@ function openMeetingDetail(m) {
   if ((m.action_items || []).length === 0) actList.innerHTML = '<li><span class="action-checkbox"></span><span>No action items found.</span></li>';
 
   renderTranscript(document.getElementById('transcriptText'), m.transcript || '');
+
+  // Diagram tab — show only when the backend produced a Mermaid diagram
+  const diagTab  = document.querySelector('#detailTabs .tab-pill[data-tab="diagram"]');
+  const diagWrap = document.getElementById('diagramWrap');
+  const diagramSrc = (m.diagram || '').trim();
+  if (diagramSrc && diagTab && diagWrap) {
+    diagTab.style.display = '';
+    renderDiagram(diagWrap, diagramSrc, m.id);
+  } else if (diagTab) {
+    diagTab.style.display = 'none';
+  }
 
   // Conversation tab — show speaker bubbles if diarized, else hide tab
   const convTab  = document.querySelector('#detailTabs .tab-pill[data-tab="conversation"]');
@@ -2204,32 +2320,201 @@ function openMeetingDetail(m) {
   document.querySelector('.nav-item[data-view="library"]')?.classList.add('active');
 }
 
+// Rich, structured Summary tab: overview + topic cards + decisions + participants.
+// Falls back to plain paragraphs for older meetings that only have `summary`.
+function renderRichSummary(el, m) {
+  if (!el) return;
+  el.innerHTML = '';
+
+  const overview   = (m.overview || m.summary || '').trim();
+  const topics     = Array.isArray(m.topics) ? m.topics : [];
+  const decisions  = Array.isArray(m.decisions) ? m.decisions : [];
+  const people     = Array.isArray(m.participants) ? m.participants : [];
+  const sentiment  = (m.sentiment || '').trim();
+
+  if (!overview && !topics.length && !decisions.length) {
+    const empty = document.createElement('div');
+    empty.className = 'tx-empty';
+    empty.textContent = 'No summary available.';
+    el.appendChild(empty);
+    return;
+  }
+
+  // ── Overview ──
+  if (overview) {
+    const sec = document.createElement('div');
+    sec.className = 'sum-overview';
+    overview.split(/\n\s*\n|\n/).map(s => s.trim()).filter(Boolean).forEach(para => {
+      const p = document.createElement('p');
+      p.textContent = para;
+      sec.appendChild(p);
+    });
+    el.appendChild(sec);
+  }
+
+  // ── Meta chips: participants + sentiment ──
+  if (people.length || sentiment) {
+    const meta = document.createElement('div');
+    meta.className = 'sum-meta';
+    people.forEach(p => {
+      const name = (typeof p === 'string') ? p : (p.name || '');
+      const role = (typeof p === 'object' && p.role) ? p.role : '';
+      if (!name) return;
+      const chip = document.createElement('span');
+      chip.className = 'sum-chip person';
+      chip.innerHTML = `<span class="sum-chip-dot"></span>${escHtml(name)}` +
+        (role ? `<span class="sum-chip-role">${escHtml(role)}</span>` : '');
+      meta.appendChild(chip);
+    });
+    if (sentiment) {
+      const chip = document.createElement('span');
+      chip.className = 'sum-chip mood';
+      chip.textContent = sentiment;
+      meta.appendChild(chip);
+    }
+    el.appendChild(meta);
+  }
+
+  // ── Decisions ──
+  if (decisions.length) {
+    el.appendChild(_sumSectionTitle('Decisions'));
+    const ul = document.createElement('ul');
+    ul.className = 'sum-decisions';
+    decisions.forEach(d => {
+      const li = document.createElement('li');
+      li.textContent = d;
+      ul.appendChild(li);
+    });
+    el.appendChild(ul);
+  }
+
+  // ── Topic cards ──
+  if (topics.length) {
+    el.appendChild(_sumSectionTitle('Topics'));
+    const grid = document.createElement('div');
+    grid.className = 'sum-topics';
+    topics.forEach(t => {
+      const title = (t && t.title) ? t.title : '';
+      const points = (t && Array.isArray(t.points)) ? t.points : [];
+      if (!title && !points.length) return;
+      const card = document.createElement('div');
+      card.className = 'sum-topic-card';
+      if (title) {
+        const h = document.createElement('div');
+        h.className = 'sum-topic-title';
+        h.textContent = title;
+        card.appendChild(h);
+      }
+      if (points.length) {
+        const ul = document.createElement('ul');
+        points.forEach(pt => {
+          const li = document.createElement('li');
+          li.textContent = pt;
+          ul.appendChild(li);
+        });
+        card.appendChild(ul);
+      }
+      grid.appendChild(card);
+    });
+    el.appendChild(grid);
+  }
+}
+
+function _sumSectionTitle(text) {
+  const h = document.createElement('div');
+  h.className = 'sum-section-title';
+  h.textContent = text;
+  return h;
+}
+
+// Render a Mermaid diagram string into `wrap`. Offline (bundled mermaid).
+// Fails soft: on any error, hides nothing breaks — shows a small notice.
+let _mermaidInited = false;
+async function renderDiagram(wrap, src, id) {
+  if (!wrap) return;
+  wrap.innerHTML = '';
+  if (typeof mermaid === 'undefined') {
+    wrap.innerHTML = '<div class="tx-empty">Diagram engine unavailable.</div>';
+    return;
+  }
+  try {
+    if (!_mermaidInited) {
+      mermaid.initialize({
+        startOnLoad: false,
+        securityLevel: 'strict',
+        theme: 'dark',
+        themeVariables: {
+          background: 'transparent',
+          primaryColor: '#1A2140',
+          primaryTextColor: '#EAF0FF',
+          primaryBorderColor: '#73B7FF',
+          lineColor: '#8F7DFF',
+          fontFamily: "'Plus Jakarta Sans', sans-serif",
+        },
+      });
+      _mermaidInited = true;
+    }
+    const gid = 'mmd-' + String(id || Math.random()).replace(/[^a-zA-Z0-9]/g, '').slice(0, 12);
+    const { svg } = await mermaid.render(gid, src);
+    wrap.innerHTML = svg;
+  } catch (e) {
+    console.warn('mermaid render failed:', e);
+    wrap.innerHTML = '<div class="tx-empty">Could not render the diagram for this meeting.</div>';
+  }
+}
+
+// Palette for N-speaker diarized conversations (cycles for >4 speakers).
+const _SPEAKER_PALETTE = ['#73B7FF', '#3EE6D8', '#8F7DFF', '#FF9C6A', '#F472B6', '#FBBF24'];
+
 function renderConversation(pane, segments, speakers) {
   pane.innerHTML = '';
 
-  // Speaker legend at top
-  const youName   = speakers.you   || 'You';
-  const otherName = speakers.other || 'Other';
+  // Map every distinct speaker label → display name + a stable color.
+  const order = [];
+  const colorOf = {};
+  const nameOf = {};
+  const norm = (s) => String(s == null ? '' : s);
 
+  for (const seg of segments) {
+    const key = norm(seg.speaker);
+    if (!(key in colorOf)) {
+      colorOf[key] = _SPEAKER_PALETTE[order.length % _SPEAKER_PALETTE.length];
+      // Legacy you/other → friendly names; otherwise use speakers map or label itself.
+      const lk = key.toLowerCase();
+      nameOf[key] = (lk === 'you') ? (speakers.you || 'You')
+                  : (lk === 'other') ? (speakers.other || 'Other')
+                  : (speakers[key] || key || 'Speaker');
+      order.push(key);
+    }
+  }
+
+  // Legend
   const legend = document.createElement('div');
   legend.className = 'conv-legend';
-  legend.innerHTML = `
-    <span class="conv-legend-you"><span class="conv-dot you"></span>${escHtml(youName)}</span>
-    <span class="conv-legend-other"><span class="conv-dot other"></span>${escHtml(otherName)}</span>
-  `;
+  order.forEach(key => {
+    const span = document.createElement('span');
+    span.className = 'conv-legend-item';
+    span.innerHTML = `<span class="conv-dot" style="background:${colorOf[key]}"></span>${escHtml(nameOf[key])}`;
+    legend.appendChild(span);
+  });
   pane.appendChild(legend);
 
   const feed = document.createElement('div');
   feed.className = 'conv-feed';
 
+  // First speaker sits on the right (treated as "you"-side), rest on the left.
+  const youSide = order[0];
+
   for (const seg of segments) {
-    const isYou = seg.speaker === 'you';
-    const name  = isYou ? youName : otherName;
+    const key = norm(seg.speaker);
+    const isYou = key === youSide;
+    const color = colorOf[key] || _SPEAKER_PALETTE[0];
 
     const bubble = document.createElement('div');
     bubble.className = `conv-bubble ${isYou ? 'you' : 'other'}`;
+    bubble.style.setProperty('--spk-color', color);
     bubble.innerHTML = `
-      <div class="conv-name">${escHtml(name)}</div>
+      <div class="conv-name" style="color:${color}">${escHtml(nameOf[key] || 'Speaker')}</div>
       <div class="conv-text">${escHtml(seg.text)}</div>
     `;
     feed.appendChild(bubble);
@@ -2241,22 +2526,41 @@ function renderConversation(pane, segments, speakers) {
 function copyMeetingMarkdown() {
   try {
     const m = JSON.parse(document.getElementById('copyMdBtn').dataset.meeting || '{}');
-    const md = [
+    const parts = [
       `# ${m.title || 'Meeting'}`,
       `*${formatDate(m.created_at)} · ${formatDuration(m.duration || 0)}*`,
       '',
       '## Summary',
-      m.summary || '',
-      '',
-      '## Key Points',
-      (m.key_points || []).map(k => `- ${k}`).join('\n'),
-      '',
-      '## Action Items',
-      (m.action_items || []).map(a => `- [ ] ${a}`).join('\n'),
-      '',
-      '## Transcript',
-      m.transcript || '',
-    ].join('\n');
+      m.overview || m.summary || '',
+    ];
+    const people = Array.isArray(m.participants) ? m.participants : [];
+    if (people.length) {
+      parts.push('', '## Participants',
+        people.map(p => {
+          const n = (typeof p === 'string') ? p : (p.name || '');
+          const r = (typeof p === 'object' && p.role) ? ` — ${p.role}` : '';
+          return `- ${n}${r}`;
+        }).join('\n'));
+    }
+    if (Array.isArray(m.decisions) && m.decisions.length) {
+      parts.push('', '## Decisions', m.decisions.map(d => `- ${d}`).join('\n'));
+    }
+    if (Array.isArray(m.topics) && m.topics.length) {
+      parts.push('', '## Topics');
+      m.topics.forEach(t => {
+        if (t.title) parts.push(`### ${t.title}`);
+        (t.points || []).forEach(p => parts.push(`- ${p}`));
+      });
+    } else if (Array.isArray(m.key_points) && m.key_points.length) {
+      parts.push('', '## Key Points', m.key_points.map(k => `- ${k}`).join('\n'));
+    }
+    parts.push('', '## Action Items',
+      (m.action_items || []).map(a => `- [ ] ${a}`).join('\n'));
+    if ((m.diagram || '').trim()) {
+      parts.push('', '## Diagram', '```mermaid', m.diagram.trim(), '```');
+    }
+    parts.push('', '## Transcript', m.transcript || '');
+    const md = parts.join('\n');
     require('electron').clipboard.writeText(md);
     showToast('Copied as Markdown', 'success');
   } catch (e) {
@@ -2319,11 +2623,21 @@ async function testConnection() {
   try {
     if (!normalized) throw new Error('Invalid URL');
     if (isLocalBackendUrl(normalized)) throw new Error('Localhost URL is disabled. Use deployed backend URL.');
-    const r = await fetch(`${url}/api/health`, { signal: AbortSignal.timeout(6000) });
-    if (r.ok) {
+
+    // Quick probe first; if it fails the service may just be asleep (Render free
+    // tier cold start), so keep probing with longer timeouts and a "Waking…" hint
+    // instead of reporting a false failure.
+    let ok = await probeBackend(url, 6000);
+    if (!ok) {
+      status.textContent = 'Waking backend…';
+      for (let attempt = 0; attempt < 4 && !ok; attempt++) {
+        ok = await probeBackend(url, 15000);
+      }
+    }
+    if (ok) {
       status.textContent = '✓ Connected';
       status.className   = 'connection-status ok';
-    } else throw new Error(`HTTP ${r.status}`);
+    } else throw new Error('No response (service may be down)');
   } catch (e) {
     status.textContent = `✗ Failed: ${e.message}`;
     status.className   = 'connection-status fail';

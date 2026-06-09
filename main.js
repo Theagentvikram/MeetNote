@@ -7,6 +7,21 @@ const axios = require('axios');
 
 const store = new Store();
 
+// ── Platform ────────────────────────────────────────────────────────────────
+// Single source of truth for platform branching, mirroring renderer.js. Set
+// MEETNOTE_FORCE_PLATFORM=win32 to simulate Windows on a Mac for testing the
+// non-native (browser loopback) capture path without a Windows machine.
+// NOTE: the real Swift binary can only ever spawn on a real darwin host, so we
+// only let it run when BOTH the forced platform and the real OS are darwin.
+const PLATFORM = process.env.MEETNOTE_FORCE_PLATFORM || process.platform;
+const IS_MAC = PLATFORM === 'darwin';
+const IS_WIN = PLATFORM === 'win32';
+const CAN_RUN_SWIFT = IS_MAC && process.platform === 'darwin';
+if (process.env.MEETNOTE_FORCE_PLATFORM) {
+  safeConsoleEarly(`[platform] FORCED to "${PLATFORM}" (real: ${process.platform}) — simulation mode`);
+}
+function safeConsoleEarly(msg) { try { console.warn(msg); } catch {} }
+
 // In production (packaged app), __dirname is inside app.asar which is a virtual FS.
 // Use process.resourcesPath to reach real files bundled alongside the asar.
 const IS_PACKAGED = app.isPackaged;
@@ -573,25 +588,61 @@ function configureDisplayMediaCapture() {
 
   const handler = async (_request, callback) => {
     try {
+      // Request screens AND windows. On Windows, screen enumeration can fail or
+      // return [] on some configs while windows still work; either source type
+      // carries the loopback audio track, so we don't want to depend on screens only.
       const sources = await desktopCapturer.getSources({
-        types: ['screen'],
+        types: ['screen', 'window'],
         thumbnailSize: { width: 1, height: 1 },
         fetchWindowIcons: false
       });
+
+      console.log(
+        `[display-media] ${PLATFORM} handler fired — ${sources.length} source(s):`,
+        sources.map(s => s.name).slice(0, 8)
+      );
 
       const source =
         sources.find(s => /entire|screen|display/i.test(s.name)) ||
         sources[0];
 
       if (!source) {
+        // No capturable source at all. On Windows this is the usual cause of
+        // "opened but no audio + error popup" — surface it instead of silently
+        // returning an empty stream the renderer can't explain.
+        console.error(
+          `[display-media] NO SOURCES on ${PLATFORM}. desktopCapturer returned []. ` +
+          `On Windows this usually means screen-capture access is blocked or no display ` +
+          `is enumerable.`
+        );
+        mainWindow?.webContents.send('display-media-diagnostic', {
+          ok: false,
+          reason: 'no-sources',
+          platform: PLATFORM,
+          sourceCount: 0
+        });
         callback({});
         return;
       }
 
-      // Non-macOS fallback path: auto-select source + loopback audio.
+      console.log(`[display-media] selecting "${source.name}" + audio:'loopback'`);
+      mainWindow?.webContents.send('display-media-diagnostic', {
+        ok: true,
+        reason: 'selected',
+        platform: PLATFORM,
+        sourceCount: sources.length,
+        sourceName: source.name
+      });
+      // Auto-select source + loopback audio (no picker shown).
       callback({ video: source, audio: 'loopback' });
     } catch (error) {
-      console.error('Display media handler error:', error);
+      console.error(`[display-media] handler error on ${PLATFORM}:`, error);
+      mainWindow?.webContents.send('display-media-diagnostic', {
+        ok: false,
+        reason: 'exception',
+        platform: PLATFORM,
+        message: String(error?.message || error)
+      });
       callback({});
     }
   };
@@ -604,6 +655,9 @@ function configureDisplayMediaCapture() {
 
 const isDev = process.env.NODE_ENV === 'development';
 
+// The mac loopback Chromium flag only matters on a real darwin host. On Windows,
+// Electron 31+ supports system-audio loopback via the display-media handler's
+// audio:'loopback' directly, so no extra command-line flag is required.
 if (process.platform === 'darwin') {
   enableMacSystemAudioCaptureFeatures();
 }
@@ -611,7 +665,7 @@ if (process.platform === 'darwin') {
 // ── Window ────────────────────────────────────────────────────────────────────
 
 function createWindow() {
-  const isMac = process.platform === 'darwin';
+  const isMac = IS_MAC;
   mainWindow = new BrowserWindow({
     width: 1400,
     height: 900,
@@ -647,7 +701,7 @@ function createWindow() {
 
   // Hide to tray on minimize (macOS)
   mainWindow.on('minimize', (e) => {
-    if (process.platform === 'darwin') {
+    if (IS_MAC) {
       e.preventDefault();
       mainWindow.hide();
     }
@@ -682,7 +736,7 @@ function updateTrayMenu() {
 // ── Permissions ───────────────────────────────────────────────────────────────
 
 function getMacPermissionSnapshot() {
-  if (process.platform !== 'darwin') {
+  if (!IS_MAC) {
     return {
       microphone: 'granted',
       screen: 'granted',
@@ -718,7 +772,7 @@ function buildPermissionGuidance(snapshot) {
 }
 
 async function openMacPrivacySettings(area = 'screen') {
-  if (process.platform !== 'darwin') return false;
+  if (!IS_MAC) return false;
 
   const section = area === 'microphone' ? 'Privacy_Microphone' : 'Privacy_ScreenCapture';
 
@@ -744,7 +798,7 @@ async function openMacPrivacySettings(area = 'screen') {
 }
 
 async function assertSwiftCapturePermissions() {
-  if (process.platform !== 'darwin') return;
+  if (!CAN_RUN_SWIFT) return;
 
   const initial = getMacPermissionSnapshot();
   mainWindow?.webContents.send('permissions-status', {
@@ -776,7 +830,7 @@ async function assertSwiftCapturePermissions() {
 }
 
 async function checkPermissions() {
-  if (process.platform !== 'darwin') return;
+  if (!IS_MAC) return;
   try {
     const snapshot = getMacPermissionSnapshot();
     mainWindow?.webContents.send('permissions-status', {
@@ -846,7 +900,7 @@ function registerIpcHandlers() {
   });
 
   ipcMain.handle('get-media-permissions', () => {
-    if (process.platform !== 'darwin') {
+    if (!IS_MAC) {
       return { microphone: 'granted', screen: 'granted' };
     }
     return {
@@ -856,7 +910,7 @@ function registerIpcHandlers() {
   });
 
   ipcMain.handle('check-audio-permissions', async () => {
-    if (process.platform !== 'darwin') return true;
+    if (!IS_MAC) return true;
     const status = systemPreferences.getMediaAccessStatus('microphone');
     if (status === 'not-determined') {
       return await systemPreferences.askForMediaAccess('microphone');
@@ -869,7 +923,7 @@ function registerIpcHandlers() {
   });
 
   ipcMain.handle('swift-capture-start', async (_, payload = {}) => {
-    if (process.platform !== 'darwin') {
+    if (!CAN_RUN_SWIFT) {
       throw new Error('Swift native capture is only available on macOS');
     }
 
@@ -890,21 +944,21 @@ function registerIpcHandlers() {
   });
 
   ipcMain.handle('swift-capture-stop', async () => {
-    if (process.platform !== 'darwin') {
+    if (!CAN_RUN_SWIFT) {
       throw new Error('Swift native capture is only available on macOS');
     }
     return await sendSwiftCaptureCommandSerial({ command: 'stop' }, 240000);
   });
 
   ipcMain.handle('swift-capture-status', async () => {
-    if (process.platform !== 'darwin') {
+    if (!CAN_RUN_SWIFT) {
       return { ok: false, command: 'status', message: 'not-supported' };
     }
     return await sendSwiftCaptureCommandSerial({ command: 'status' }, 15000);
   });
 
   ipcMain.handle('swift-capture-abort', async () => {
-    if (process.platform === 'darwin') {
+    if (CAN_RUN_SWIFT) {
       try {
         // Abort can involve teardown work, so avoid short timeouts and avoid force-killing.
         await sendSwiftCaptureCommandSerial({ command: 'abort' }, 240000);

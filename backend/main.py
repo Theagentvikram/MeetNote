@@ -172,16 +172,31 @@ async def transcribe(
 
     # Summarise with the plain-text version (strip speaker labels for context)
     plain_transcript = _strip_labels(transcript)
-    ai_title, summary, key_points, action_items = await _summarise(plain_transcript, title, meeting_id)
-    meeting_title = ai_title if ai_title else title
+    analysis = await _analyse(plain_transcript, title, meeting_id)
+    meeting_title = analysis.get("title") or title
+
+    # Single merged track (no YOU/OTHER labels from dual capture) → LLM-diarize so
+    # an in-person / group recording reads as a real multi-speaker conversation.
+    if diarized_transcript is None:
+        llm_turns = await _diarize_llm(plain_transcript, meeting_id)
+        if llm_turns:
+            diarized_transcript = llm_turns
+            speakers = _speakers_from_turns(llm_turns)
 
     response = {
         "id": meeting_id,
         "title": meeting_title,
         "transcript": transcript,          # may contain YOU:/OTHER: labels
-        "summary": summary,
-        "key_points": key_points,
-        "action_items": action_items,
+        "summary": analysis.get("summary", ""),
+        "overview": analysis.get("overview", ""),
+        "topics": analysis.get("topics", []),
+        "decisions": analysis.get("decisions", []),
+        "participants": analysis.get("participants", []),
+        "sentiment": analysis.get("sentiment", ""),
+        "diagram": analysis.get("diagram", ""),
+        "diagram_type": analysis.get("diagram_type", ""),
+        "key_points": analysis.get("key_points", []),
+        "action_items": analysis.get("action_items", []),
         "duration": duration,
         "confidence": round(confidence, 2) if confidence else 0.9,
         "language": lang_arg or "en",
@@ -542,7 +557,291 @@ def _condense_chunk(chunk: str, idx: int, meeting_id: str) -> str:
         return chunk[:2000]
 
 
+# ── LLM diarization (free, no extra deps) ─────────────────────────────────────
+#
+# Groq Whisper gives timestamped segments but NO speaker identity. For recordings
+# captured as a single merged track (in-person meetings, group calls on one
+# channel) there is no acoustic separation available. We attribute each segment to
+# a speaker from conversational cues (turn-taking, addressing, self-reference,
+# topic ownership). This is readability-grade diarization, not forensic: good
+# enough to turn a wall of text into a real conversation.
+#
+# Model: openai/gpt-oss-120b — a Groq *production* reasoning model on the same free
+# GROQ_API_KEY (no extra cost tier). It reasons over turn-taking noticeably better
+# than llama-3.3-70b-versatile and infers real role/name labels (e.g. "Interviewer")
+# rather than defaulting to "Speaker N". Summary/analysis calls stay on 70B.
+DIARIZATION_MODEL = "openai/gpt-oss-120b"
+
+def _split_sentences(text: str) -> list:
+    import re as _re
+    parts = _re.split(r"(?<=[.!?])\s+", (text or "").strip())
+    return [p.strip() for p in parts if p.strip()]
+
+
+async def _diarize_llm(plain_transcript: str, meeting_id: str, max_speakers: int = 6) -> Optional[list]:
+    """
+    Attribute an unlabeled transcript to N speakers using LLaMA. Returns a list of
+    {"speaker": "Speaker 1"|inferred-name, "text": ...} turns, or None on failure.
+    Only meant for single-track transcripts that have no YOU/OTHER labels.
+    """
+    if not plain_transcript or len(plain_transcript.strip()) < 80:
+        return None
+
+    # Number the sentences so the model returns a compact mapping, not the whole
+    # text back (cheaper, less drift). Cap to keep within context.
+    sentences = _split_sentences(plain_transcript)[:200]
+    if len(sentences) < 2:
+        return None
+    numbered = "\n".join(f"{i}. {s}" for i, s in enumerate(sentences))
+
+    prompt = f"""You are a diarization engine. The transcript below is ONE audio track with
+multiple people talking; speaker labels were lost. Using conversational cues
+(turn-taking, questions/answers, who is addressed, self-reference, who owns which
+topic), assign each numbered sentence to a speaker.
+
+Rules:
+- Use stable labels "Speaker 1", "Speaker 2", … (at most {max_speakers}).
+- If a real name or clear role is stated in the transcript for a speaker, use it
+  instead (e.g. "Priya", "Interviewer", "Client"). Otherwise keep "Speaker N".
+- Consecutive sentences are usually the SAME speaker; only switch when cues say so.
+- Do NOT change, drop, or invent sentence text. Map by index only.
+- Return ONLY valid JSON.
+
+Sentences:
+{numbered}
+
+Return exactly:
+{{
+  "speakers": {{ "Speaker 1": "short role/name guess or empty", "Speaker 2": "..." }},
+  "turns": [ {{ "speaker": "Speaker 1", "sentences": [0,1,2] }}, {{ "speaker": "Speaker 2", "sentences": [3] }} ]
+}}"""
+
+    parsed = await asyncio.get_event_loop().run_in_executor(
+        None, _llama_json, prompt, meeting_id, 2000, DIARIZATION_MODEL
+    )
+    if not parsed or "turns" not in parsed:
+        return None
+
+    # Rebuild turns from the index mapping against OUR sentence list (the model
+    # must not have rewritten anything — we only trust the indices).
+    out = []
+    for turn in parsed.get("turns", []):
+        spk = str(turn.get("speaker", "")).strip() or "Speaker 1"
+        idxs = turn.get("sentences", [])
+        if not isinstance(idxs, list):
+            continue
+        chunk = " ".join(
+            sentences[i] for i in idxs
+            if isinstance(i, int) and 0 <= i < len(sentences)
+        ).strip()
+        if not chunk:
+            continue
+        # Merge into previous if same speaker (model sometimes over-splits).
+        if out and out[-1]["speaker"] == spk:
+            out[-1]["text"] = (out[-1]["text"] + " " + chunk).strip()
+        else:
+            out.append({"speaker": spk, "text": chunk})
+
+    if len(out) < 2:
+        return None
+    logger.info(f"[{meeting_id}] LLM diarization: {len(out)} turns across "
+                f"{len({t['speaker'] for t in out})} speakers")
+    return out
+
+
+def _speakers_from_turns(turns: list) -> dict:
+    """Build a {label: display_name} map preserving first-seen order."""
+    seen = {}
+    for t in turns:
+        spk = t.get("speaker", "")
+        if spk and spk not in seen:
+            seen[spk] = spk
+    return seen
+
+
+# ── Rich structured analysis (overview, topics, decisions, diagram) ────────────
+
+def _empty_analysis(summary_text: str = "") -> dict:
+    return {
+        "overview": summary_text,
+        "topics": [],
+        "decisions": [],
+        "participants": [],
+        "sentiment": "",
+        "diagram": "",
+        "diagram_type": "",
+    }
+
+
+async def _analyse(transcript: str, title: str, meeting_id: str) -> dict:
+    """
+    Produce a RICH, structured meeting analysis (free, LLaMA-3.3-70B). Returns a
+    dict with: overview, topics[{title,points[]}], decisions[], action_items[],
+    participants[{name,role}], sentiment, plus a Mermaid `diagram` string the
+    model generates from the actual content (timeline / mindmap / flowchart).
+    Falls back honestly (never echoes the transcript) on parse failure.
+    """
+    if not transcript or not transcript.strip():
+        return {**_empty_analysis("No speech detected."),
+                "title": "", "summary": "No speech detected.",
+                "key_points": [], "action_items": []}
+
+    # Long meeting → map-reduce first (reuse the existing condense step).
+    source = transcript
+    if len(transcript) > 10000:
+        logger.info(f"[{meeting_id}] Long transcript ({len(transcript)} chars) → chunked analyse")
+        loop = asyncio.get_event_loop()
+        chunks = _chunk_text(transcript)
+        condensed = []
+        for i, ch in enumerate(chunks):
+            condensed.append(await loop.run_in_executor(None, _condense_chunk, ch, i + 1, meeting_id))
+        source = "\n\n".join(condensed)
+
+    prompt = f"""You are an expert meeting analyst. Analyse the transcript and return ONLY valid JSON.
+
+Rules:
+- Base EVERYTHING strictly on the transcript. Never invent facts, names, or numbers.
+- If the transcript is too short/empty/incoherent to analyse, set "overview" to an
+  honest note (e.g. "The recording was too short or unclear to summarise.") and
+  leave the arrays empty. Do NOT pad with guesses.
+- When there IS substance, be specific and concrete: real decisions, topics, numbers, owners.
+- For "diagram", emit a SHORT valid Mermaid diagram that visualises the meeting's
+  actual structure. Choose the best type:
+    * "mindmap" for a topic breakdown,
+    * "timeline" for a chronological discussion,
+    * "flowchart" (graph TD) for a decision/process flow.
+  Keep it under ~15 nodes. Use ONLY plain ASCII node labels (no parentheses, colons,
+  or quotes inside labels — they break Mermaid). If there isn't enough structure for
+  a meaningful diagram, return "" for both diagram and diagram_type.
+
+Transcript:
+{source[:14000]}
+
+Return exactly this JSON shape:
+{{
+  "title": "Short specific meeting title (4-8 words, the actual topic; avoid generic words)",
+  "overview": "A clear executive summary in 2-4 sentences: what was discussed, the thrust, and the outcome.",
+  "topics": [ {{ "title": "Topic name", "points": ["specific point", "..."] }} ],
+  "decisions": ["a concrete decision that was made", "..."],
+  "actionItems": ["concrete action with owner/context if known", "..."],
+  "participants": [ {{ "name": "Speaker name or 'Speaker 1'", "role": "inferred role or empty" }} ],
+  "sentiment": "one short phrase, e.g. 'collaborative and decisive' or 'tense, unresolved'",
+  "diagram": "mermaid source, or empty string",
+  "diagram_type": "mindmap | timeline | flowchart | empty"
+}}"""
+
+    last_err = None
+    for attempt in range(1, 3):
+        try:
+            logger.info(f"[{meeting_id}] Rich analysis with LLaMA… (attempt {attempt})")
+            chat = _groq_client().chat.completions.create(
+                model="llama-3.3-70b-versatile",
+                messages=[{"role": "user", "content": prompt}],
+                temperature=0.2,
+                max_tokens=3000,
+                response_format={"type": "json_object"},
+            )
+            raw = chat.choices[0].message.content or ""
+            parsed = _parse_summary_json(raw)
+            if parsed is None:
+                raise ValueError("could not parse JSON from model output")
+
+            overview = (parsed.get("overview") or parsed.get("summary") or "").strip()
+            if not overview:
+                raise ValueError("model returned an empty overview")
+
+            topics = []
+            for t in (parsed.get("topics") or []):
+                if not isinstance(t, dict):
+                    continue
+                t_title = str(t.get("title", "")).strip()
+                pts = [str(p).strip() for p in (t.get("points") or []) if str(p).strip()]
+                if t_title or pts:
+                    topics.append({"title": t_title, "points": pts})
+
+            decisions = [str(d).strip() for d in (parsed.get("decisions") or []) if str(d).strip()]
+            action_items = parsed.get("actionItems") or parsed.get("action_items") or []
+            action_items = [str(a).strip() for a in action_items if str(a).strip()]
+
+            participants = []
+            for p in (parsed.get("participants") or []):
+                if isinstance(p, dict):
+                    nm = str(p.get("name", "")).strip()
+                    rl = str(p.get("role", "")).strip()
+                    if nm:
+                        participants.append({"name": nm, "role": rl})
+                elif isinstance(p, str) and p.strip():
+                    participants.append({"name": p.strip(), "role": ""})
+
+            diagram = (parsed.get("diagram") or "").strip()
+            diagram_type = (parsed.get("diagram_type") or "").strip().lower()
+            diagram = _sanitize_mermaid(diagram, diagram_type)
+
+            # Legacy fields, derived so old UI / cache / markdown copy keep working.
+            legacy_key_points = decisions[:] + [
+                p for t in topics for p in t["points"]
+            ]
+            legacy_key_points = legacy_key_points[:12]
+
+            ai_title = (parsed.get("title") or "").strip()
+            logger.info(
+                f"[{meeting_id}] Analysis OK: {len(topics)} topics, {len(decisions)} decisions, "
+                f"{len(action_items)} actions, diagram={'yes' if diagram else 'no'}"
+            )
+            return {
+                "title": ai_title,
+                "overview": overview,
+                "summary": overview,                 # legacy alias
+                "topics": topics,
+                "decisions": decisions,
+                "action_items": action_items,
+                "key_points": legacy_key_points,      # legacy alias
+                "participants": participants,
+                "sentiment": (parsed.get("sentiment") or "").strip(),
+                "diagram": diagram,
+                "diagram_type": diagram_type if diagram else "",
+            }
+        except Exception as e:
+            last_err = e
+            logger.warning(f"[{meeting_id}] Analysis attempt {attempt} failed: {e}")
+
+    logger.error(f"[{meeting_id}] Analysis failed after retries: {last_err}")
+    fallback = "Summary unavailable — the AI summary could not be generated for this recording."
+    return {**_empty_analysis(fallback), "title": "", "summary": fallback,
+            "key_points": [], "action_items": []}
+
+
+def _sanitize_mermaid(src: str, dtype: str) -> str:
+    """
+    Light guard so a malformed Mermaid string can't blank the whole Summary tab.
+    Strips code fences and rejects diagrams that don't start with a known header.
+    The renderer also try/catches, so this is belt-and-suspenders.
+    """
+    if not src:
+        return ""
+    s = src.strip()
+    if s.startswith("```"):
+        parts = s.split("```")
+        if len(parts) >= 2:
+            s = parts[1]
+            if s.lstrip().lower().startswith("mermaid"):
+                s = s.lstrip()[7:]
+            s = s.strip()
+    headers = ("mindmap", "timeline", "flowchart", "graph ", "sequenceDiagram", "journey")
+    if not s.lower().startswith(tuple(h.lower() for h in headers)):
+        # Try to coerce from declared type when the model forgot the header.
+        if dtype in ("mindmap", "timeline"):
+            s = f"{dtype}\n{s}"
+        elif dtype == "flowchart":
+            s = f"graph TD\n{s}"
+        else:
+            return ""
+    return s[:2000]
+
+
 async def _summarise(transcript: str, title: str, meeting_id: str):
+    if not transcript:
+        return "", "No speech detected.", [], []
     if not transcript:
         return "", "No speech detected.", [], []
 
@@ -577,35 +876,108 @@ Return exactly this JSON shape:
   "actionItems": ["concrete action item with owner/context if known", "..."]
 }}"""
 
+    # Try up to twice: the model occasionally emits prose around the JSON or
+    # mildly malformed JSON. A single retry recovers almost all of these.
+    last_err = None
+    for attempt in range(1, 3):
+        try:
+            logger.info(f"[{meeting_id}] Summarising with LLaMA… (attempt {attempt})")
+            chat = _groq_client().chat.completions.create(
+                model="llama-3.3-70b-versatile",
+                messages=[{"role": "user", "content": prompt}],
+                temperature=0.2,
+                max_tokens=2048,
+                response_format={"type": "json_object"},
+            )
+            raw = chat.choices[0].message.content or ""
+            parsed = _parse_summary_json(raw)
+            if parsed is None:
+                raise ValueError("could not parse JSON from model output")
+
+            ai_title = (parsed.get("title") or "").strip()
+            summary = (parsed.get("summary") or "").strip()
+            # Accept both camelCase and snake_case key names from the model.
+            key_points = parsed.get("keyPoints") or parsed.get("key_points") or []
+            action_items = parsed.get("actionItems") or parsed.get("action_items") or []
+            key_points = [str(x).strip() for x in key_points if str(x).strip()]
+            action_items = [str(x).strip() for x in action_items if str(x).strip()]
+
+            if not summary:
+                raise ValueError("model returned an empty summary")
+
+            logger.info(
+                f"[{meeting_id}] Summary OK: title={ai_title!r}, "
+                f"{len(key_points)} key points, {len(action_items)} actions"
+            )
+            return ai_title, summary, key_points, action_items
+
+        except Exception as e:
+            last_err = e
+            logger.warning(f"[{meeting_id}] Summarisation attempt {attempt} failed: {e}")
+
+    # Both attempts failed. Return an HONEST fallback — never echo the raw
+    # transcript as if it were a summary (that's what made past meetings look
+    # "broken": the transcript was duplicated into the summary field).
+    logger.error(f"[{meeting_id}] Summarisation failed after retries: {last_err}")
+    return "", "Summary unavailable — the AI summary could not be generated for this recording.", [], []
+
+
+def _parse_summary_json(raw: str) -> Optional[dict]:
+    """Robustly pull a JSON object out of a model response.
+
+    Handles: leading/trailing whitespace, ```json code fences, and stray prose
+    around the JSON. Returns the parsed dict, or None if nothing usable.
+    """
+    if not raw:
+        return None
+    text = raw.strip()
+
+    # Strip markdown code fences (```json … ``` or ``` … ```)
+    if text.startswith("```"):
+        inner = text.split("```")
+        if len(inner) >= 2:
+            text = inner[1]
+            if text.lstrip().lower().startswith("json"):
+                text = text.lstrip()[4:]
+            text = text.strip()
+
+    # Fast path: the whole thing is JSON.
     try:
-        logger.info(f"[{meeting_id}] Summarising with LLaMA…")
-        chat = _groq_client().chat.completions.create(
-            model="llama-3.3-70b-versatile",
-            messages=[{"role": "user", "content": prompt}],
-            temperature=0.2,
-            max_tokens=2048,
-            response_format={"type": "json_object"},
-        )
-        raw = chat.choices[0].message.content.strip()
+        obj = json.loads(text)
+        return obj if isinstance(obj, dict) else None
+    except Exception:
+        pass
 
-        # Strip markdown code fences if present
-        if raw.startswith("```"):
-            raw = raw.split("```")[1]
-            if raw.startswith("json"):
-                raw = raw[4:]
-        raw = raw.strip()
-
-        parsed = json.loads(raw)
-        ai_title = parsed.get("title", "")
-        summary = parsed.get("summary", "")
-        key_points = parsed.get("keyPoints", [])
-        action_items = parsed.get("actionItems", [])
-        logger.info(f"[{meeting_id}] Summary OK: title={ai_title!r}, {len(key_points)} key points, {len(action_items)} actions")
-        return ai_title, summary, key_points, action_items
-
-    except Exception as e:
-        logger.warning(f"[{meeting_id}] Summarisation failed: {e}")
-        return "", transcript[:300] + ("…" if len(transcript) > 300 else ""), [], []
+    # Fallback: extract the first balanced {...} object from the text.
+    start = text.find("{")
+    if start == -1:
+        return None
+    depth = 0
+    in_str = False
+    esc = False
+    for i in range(start, len(text)):
+        c = text[i]
+        if in_str:
+            if esc:
+                esc = False
+            elif c == "\\":
+                esc = True
+            elif c == '"':
+                in_str = False
+            continue
+        if c == '"':
+            in_str = True
+        elif c == "{":
+            depth += 1
+        elif c == "}":
+            depth -= 1
+            if depth == 0:
+                try:
+                    obj = json.loads(text[start:i + 1])
+                    return obj if isinstance(obj, dict) else None
+                except Exception:
+                    return None
+    return None
 
 
 # ── Live coaching helpers ─────────────────────────────────────────────────────
@@ -680,11 +1052,16 @@ Return this exact JSON:
         return None
 
 
-def _llama_json(prompt: str, meeting_id: str, max_tokens: int = 400) -> dict | None:
-    """Call LLaMA, parse JSON (tolerating code fences). Returns dict or None."""
+def _llama_json(prompt: str, meeting_id: str, max_tokens: int = 400, model: str = "llama-3.3-70b-versatile") -> dict | None:
+    """Call a Groq chat model, parse JSON (tolerating code fences). Returns dict or None.
+
+    `model` defaults to llama-3.3-70b-versatile but can be overridden (e.g. the
+    stronger reasoning model gpt-oss-120b for diarization) — both are Groq
+    production models served on the same free GROQ_API_KEY, so there is no extra cost.
+    """
     try:
         chat = _groq_client().chat.completions.create(
-            model="llama-3.3-70b-versatile",
+            model=model,
             messages=[{"role": "user", "content": prompt}],
             temperature=0.3,
             max_tokens=max_tokens,
@@ -938,15 +1315,31 @@ async def session_stream(websocket: WebSocket, session_id: str):
     # Finalise: summarise + persist so the session appears in Library/Detail
     full_text = "\n".join(t["text"] for t in transcript if t.get("text"))
     duration = int((datetime.utcnow() - started_at).total_seconds())
-    ai_title, summary, key_points, action_items = await _summarise(full_text, title, session_id)
+    analysis = await _analyse(full_text, title, session_id)
+
+    # Live sessions are already speaker-tagged (You/Other) from the two tracks;
+    # surface that as a diarized conversation too.
+    diarized = [
+        {"speaker": t["speaker"], "text": t["text"]}
+        for t in transcript if t.get("text")
+    ]
 
     meeting = {
         "id": session_id,
-        "title": ai_title or title,
+        "title": analysis.get("title") or title,
         "transcript": full_text,
-        "summary": summary,
-        "key_points": key_points,
-        "action_items": action_items,
+        "summary": analysis.get("summary", ""),
+        "overview": analysis.get("overview", ""),
+        "topics": analysis.get("topics", []),
+        "decisions": analysis.get("decisions", []),
+        "participants": analysis.get("participants", []),
+        "sentiment": analysis.get("sentiment", ""),
+        "diagram": analysis.get("diagram", ""),
+        "diagram_type": analysis.get("diagram_type", ""),
+        "key_points": analysis.get("key_points", []),
+        "action_items": analysis.get("action_items", []),
+        "diarized_transcript": diarized,
+        "speakers": _speakers_from_turns(diarized),
         "duration": duration,
         "confidence": 0.9,
         "language": language,

@@ -365,6 +365,7 @@
             <button class="tab-pill active" data-tab="summary">Summary</button>
             <button class="tab-pill" data-tab="keypoints">Key Points</button>
             <button class="tab-pill" data-tab="actions">Actions</button>
+            <button class="tab-pill" data-tab="diagram" style="display:none">Diagram</button>
             <button class="tab-pill" data-tab="conversation" style="display:none">Conversation</button>
             <button class="tab-pill" data-tab="transcript">Transcript</button>
           </div>
@@ -372,7 +373,7 @@
           <!-- Tab content -->
           <div class="card detail-content-card">
             <div class="tab-content active" id="tabSummary">
-              <p id="summaryText" class="detail-body-text"></p>
+              <div id="summaryText" class="detail-body-text"></div>
             </div>
             <div class="tab-content" id="tabKeypoints">
               <ul id="keypointsList" class="bullet-list"></ul>
@@ -380,9 +381,12 @@
             <div class="tab-content" id="tabActions">
               <ul id="actionsList" class="action-list"></ul>
             </div>
+            <div class="tab-content" id="tabDiagram">
+              <div id="diagramWrap" class="diagram-wrap"></div>
+            </div>
             <div class="tab-content" id="tabConversation"></div>
             <div class="tab-content" id="tabTranscript">
-              <p id="transcriptText" class="transcript-text"></p>
+              <div id="transcriptText" class="transcript-text"></div>
             </div>
           </div>
         </div>
@@ -534,6 +538,7 @@
   <!-- Toast -->
   <div class="toast-container" id="toastContainer"></div>
 
+  <script src="assets/vendor/mermaid.min.js"></script>
   <script src="renderer.js"></script>
 </body>
 </html>
